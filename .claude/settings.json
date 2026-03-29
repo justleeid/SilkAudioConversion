@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/lan/silk_encode/**)",
+      "Bash(curl -s http://172.16.8.145:5173)",
+      "Bash(curl -s http://172.16.8.145:8000/health)",
+      "Bash(curl -s -X POST http://172.16.8.145:8000/api/upload -F \"files=@/Users/lan/silk_encode/backend/uploads/82c1b763519541ba9a242a81d8d01342_test_wechat.silk\")",
+      "Bash(curl -s -X POST http://172.16.8.145:8000/api/convert/145db43cbd854826851abd53b3b9d30a -H \"Content-Type: application/json\" -d '{\"\"\"\"target_format\"\"\"\":\"\"\"\"WAV\"\"\"\",\"\"\"\"sample_rate\"\"\"\":24000}')",
+      "Bash(curl -s http://172.16.8.145:8000/api/convert/145db43cbd854826851abd53b3b9d30a/status)",
+      "Read(//private/tmp/**)",
+      "Bash(cp /Users/lan/silk_encode/backend/uploads/82c1b763519541ba9a242a81d8d01342_test_wechat.silk test.silk)",
+      "Bash(/Users/lan/silk_encode/tools/silk-v3-decoder/silk/decoder test.silk test.pcm)",
+      "Bash(python3:*)"
+    ]
+  }
+}

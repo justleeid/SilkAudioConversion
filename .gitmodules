@@ -1,0 +1,3 @@
+[submodule "tools/silk-v3-decoder"]
+	path = tools/silk-v3-decoder
+	url = https://github.com/kn007/silk-v3-decoder
