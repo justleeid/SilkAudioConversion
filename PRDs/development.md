@@ -219,7 +219,7 @@ from fastapi.responses import FileResponse
 from app.models import ConvertRequest, ApiResponse
 from app.services import ConvertService
 
-router = APIRouter(prefix="/api", tags=["convert"])
+router = APIRouter(prefix="/api/convert", tags=["convert"])
 
 @router.post("/upload", response_model=ApiResponse)
 async def upload_files(files: list[UploadFile] = File(...)):
@@ -227,17 +227,17 @@ async def upload_files(files: list[UploadFile] = File(...)):
     service = ConvertService()
     return await service.upload_and_validate(files)
 
-@router.post("/convert/{taskId}", response_model=ApiResponse)
-async def convert(taskId: str, request: ConvertRequest):
+@router.post("/{task_id}", response_model=ApiResponse)
+async def convert(task_id: str, request: ConvertRequest):
     """执行转换操作"""
     service = ConvertService()
-  return await service.start_conversion(taskId, request)
+    return await service.start_conversion(task_id, request)
 
-@router.get("/convert/{taskId}/status", response_model=ApiResponse)
-async def query_status(taskId: str):
+@router.get("/{task_id}/status", response_model=ApiResponse)
+async def query_status(task_id: str):
     """查询转换状态"""
     service = ConvertService()
-  return await service.get_status(taskId)
+    return await service.get_status(task_id)
 ```
 
 #### 4.2.2 统一响应格式
@@ -272,7 +272,7 @@ ERROR_CODES = {
 success_response = ApiResponse(
     code=0,
     message="操作成功",
-  data={"taskId": "abc123"}
+    data={"task_id": "abc123"}
 )
 ```
 
@@ -388,7 +388,7 @@ class AudioService:
     def __init__(self):
         self.decoder_path = Path(settings.SILK_DECODER_BIN)
         self.encoder_path = Path(settings.SILK_ENCODER_BIN)
-    
+
     async def silk_to_wav(self, silk_path: Path, output_path: Path) -> bool:
         """SILK 解码为 WAV"""
         try:
@@ -400,494 +400,15 @@ class AudioService:
                 str(pcm_path)
             ]
             subprocess.run(cmd_decode, check=True)
-            
-            # 2. PCM 转 WAV（使用 ffmpeg）
+
+            # 2. 使用 ffmpeg 转换为 WAV
             cmd_ffmpeg = [
-                'ffmpeg', '-y',
-                '-f', 's16le',
-                '-ar', '24000',
-                '-ac', '1',
-                '-i', str(pcm_path),
-                str(output_path)
+                'ffmpeg', '-y', '-f', 's16le', '-ar', str(settings.SAMPLE_RATE),
+                '-ac', '1', '-i', str(pcm_path), str(output_path)
             ]
             subprocess.run(cmd_ffmpeg, check=True)
-            
-            # 3. 清理临时文件
-            pcm_path.unlink()
-            
-            logger.info(f"SILK 转 WAV 成功: {output_path}")
             return True
-        
         except Exception as e:
-            logger.error(f"SILK 转 WAV 失败: {str(e)}")
+            logger.error(f"解码失败: {e}")
             return False
 ```
-
-### 4.3 日志规范
-
-```python
-# app/logger.py
-import sys
-from loguru import logger
-from app.config import settings
-
-# 移除默认处理器
-logger.remove()
-
-# 添加控制台输出
-logger.add(
-    sys.stdout,
-    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-    level=settings.LOG_LEVEL
-)
-
-# 添加文件输出
-logger.add(
-    settings.LOG_FILE,
-    format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
-    level=settings.LOG_LEVEL,
-    rotation="500 MB",
-    retention="7 days"
-)
-```
-
----
-
-## 5. API 设计规范
-
-### 5.1 RESTful 规范
-
-- 使用 HTTP 方法表示操作：GET (查询)、POST (创建/执行)、DELETE (删除)
-- 路径参数使用花括号：`/api/convert/{taskId}`
-- 使用 HTTP 状态码：200 (成功)、400 (请求错误)、404 (未找到)、500 (服务器错误)
-- 版本号可选，推荐在路径中体现：`/api/v1/convert`
-
-### 5.2 统一响应格式
-
-所有 API 响应遵循此格式：
-
-```json
-{
-  "code": 0,
-  "message": "操作成功",
-  "data": {}
-}
-```
-
-- `code`: 0 表示成功，其他值为错误码
-- `message`: 人类可读的消息
-- `data`: 响应数据，可选
-
-### 5.3 错误码规范
-
-| 错误码 | 含义 | HTTP 状态码 |
-|--------|------|-----------|
-| 0 | 成功 | 200 |
-| 400 | 请求参数错误 | 400 |
-| 401 | 未授权 | 401 |
-| 403 | 禁止访问 | 403 |
-| 404 | 资源不存在 | 404 |
-| 413 | 文件过大 | 413 |
-| 500 | 服务器错误 | 500 |
-| 1001 | 无效的 SILK 文件头 | 400 |
-| 1002 | 不支持的文件格式 | 400 |
-| 1003 | 转换失败 | 500 |
-
-### 5.4 转换请求参数约束
-
-`POST /api/convert/{taskId}` 请求体定义：
-
-```json
-{
-  "targetFormat": "WAV",
-  "wechatCompatible": true,
-  "sampleRate": 24000,
-  "bitRate": 24000,
-  "frameSize": 20
-}
-```
-
-- `wechatCompatible`: 布尔值，默认 `true`
-  - 当 `true` 时：输出微信兼容 SILK（添加 `0x02` 头，移除 `b'\xff\xff'` 尾标记）
-  - 当 `false` 时：输出标准 SILK（不添加 `0x02` 头，保留标准结构）
-  - 适用范围：所有输出 SILK 的场景（包括普通音频转 SILK、PLIST 还原为 SILK）
-
----
-
-## 6. 安全规范
-
-### 6.1 文件上传安全
-
-```python
-# app/middleware/security.py
-import os
-from pathlib import Path
-from fastapi import UploadFile
-
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
-ALLOWED_EXTENSIONS = {'.silk', '.wav', '.mp3', '.amr'}
-
-def validate_upload(file: UploadFile) -> bool:
-    """验证上传文件"""
-    # 1. 检查文件大小
-    if file.size and file.size > MAX_FILE_SIZE:
-        raise ValueError(f"文件过大，最大 {MAX_FILE_SIZE / 1024 / 1024:.0f}MB")
-    
-    # 2. 检查文件扩展名
-    file_ext = Path(file.filename).suffix.lower()
-    if file_ext not in ALLOWED_EXTENSIONS:
-        raise ValueError(f"不支持的文件格式: {file_ext}")
-    
-    # 3. 检查文件魔数
-    from python_magic import Magic
-    mime = Magic(mime=True)
-    file_type = mime.from_buffer(file.file.read(1024))
-    
-    # 验证文件类型
-    valid_types = ['audio/x-silk', 'audio/wav', 'audio/mpeg', 'audio/amr']
-    if not any(t in file_type for t in valid_types):
-        raise ValueError("文件内容与扩展名不匹配")
-    
-    file.file.seek(0)  # 重置文件指针
-    return True
-```
-
-### 6.2 目录访问控制
-
-```python
-# app/utils/path_security.py
-from pathlib import Path
-
-def get_safe_path(base_dir: Path, filename: str) -> Path:
-    """获取安全的文件路径"""
-    # 1. 禁止路径遍历
-    if '..' in filename or filename.startswith('/'):
-        raise ValueError("非法文件名")
-    
-    # 2. 构建安全路径
-    safe_path = (base_dir / filename).resolve()
-    
-    # 3. 验证路径在允许范围内
-    if not str(safe_path).startswith(str(base_dir.resolve())):
-        raise ValueError("文件路径超出允许范围")
-    
-    return safe_path
-```
-
-### 6.3 CORS 配置
-
-```python
-# app/main.py
-from fastapi.middleware.cors import CORSMiddleware
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:8080"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["Content-Disposition"]
-)
-```
-
----
-
-## 7. 配置管理
-
-### 7.1 环境变量配置
-
-```bash
-# .env.example
-# 服务器配置
-HOST=0.0.0.0
-PORT=8000
-LOG_LEVEL=INFO
-LOG_FILE=logs/app.log
-
-# 文件上传配置
-UPLOAD_DIR=./uploads
-TEMP_DIR=./temp
-OUTPUT_DIR=./output
-MAX_FILE_SIZE=52428800
-MAX_FILE_COUNT=50
-
-# SILK 工具路径
-SILK_DECODER_BIN=./tools/silk-v3-decoder/silk_v3_decoder
-SILK_ENCODER_BIN=./tools/silk-v3-encoder/silk_v3_encoder
-
-# 任务队列配置
-MAX_CONCURRENT_TASKS=5
-TASK_TIMEOUT=3600
-
-# 暂存区配置
-CACHE_EXPIRE_HOURS=48
-CACHE_CLEANUP_INTERVAL=3600
-```
-
-### 7.2 Python 配置类
-
-```python
-# app/config.py
-from pydantic_settings import BaseSettings
-
-class Settings(BaseSettings):
-    """应用配置"""
-    
-    # 服务器配置
-    host: str = "0.0.0.0"
-    port: int = 8000
-    log_level: str = "INFO"
-    log_file: str = "logs/app.log"
-    
-    # 文件上传配置
-    upload_dir: str = "./uploads"
-    temp_dir: str = "./temp"
-    output_dir: str = "./output"
-    max_file_size: int = 52428800  # 50 MB
-    max_file_count: int = 50
-    
-    # SILK 工具路径
-    silk_decoder_bin: str = "./tools/silk-v3-decoder/silk_v3_decoder"
-    silk_encoder_bin: str = "./tools/silk-v3-encoder/silk_v3_encoder"
-    
-    # 任务队列配置
-    max_concurrent_tasks: int = 5
-    task_timeout: int = 3600
-    
-    # 暂存区配置
-    cache_expire_hours: int = 48
-    cache_cleanup_interval: int = 3600
-    
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
-
-settings = Settings()
-```
-
----
-
-## 8. 部署规范
-
-### 8.1 Docker 部署（推荐）
-
-```yaml
-# docker-compose.yml
-version: '3.8'
-
-services:
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
-    environment:
-      - LOG_LEVEL=INFO
-      - MAX_CONCURRENT_TASKS=5
-    volumes:
-      - ./backend/uploads:/app/uploads
-      - ./backend/temp:/app/temp
-      - ./backend/output:/app/output
-    networks:
-      - silk_network
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "3000:80"
-    depends_on:
-      - backend
-    networks:
-      - silk_network
-
-  nginx:
-    image: nginx:1.25-alpine
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - backend
-      - frontend
-    networks:
-      - silk_network
-
-networks:
-  silk_network:
-    driver: bridge
-```
-
-### 8.2 本地开发部署
-
-```bash
-# 后端启动
-cd backend
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-
-# 前端启动（新终端）
-cd frontend
-npm install
-npm run dev
-```
-
----
-
-## 9. 测试规范
-
-### 9.1 后端测试
-
-```python
-# tests/test_audio_service.py
-import pytest
-from pathlib import Path
-from app.services import AudioService
-
-@pytest.mark.asyncio
-async def test_silk_to_wav():
-    """测试 SILK 转 WAV"""
-    service = AudioService()
-    
-    # 使用测试文件
-    input_file = Path("tests/fixtures/test.silk")
-    output_file = Path("tests/output/test.wav")
-    
-    result = await service.silk_to_wav(input_file, output_file)
-    
-    assert result is True
-    assert output_file.exists()
-```
-
-### 9.2 前端测试
-
-```typescript
-// tests/api.test.ts
-import { describe, it, expect, vi } from 'vitest'
-import { convertApi } from '@/api/convert'
-
-describe('Convert API', () => {
-  it('should upload files successfully', async () => {
-    const files = [new File(['content'], 'test.silk')]
-    
-    // Mock 请求
-    vi.mock('@/api/convert', () => ({
-      convertApi: {
-        upload: vi.fn().mockResolvedValue({
-          code: 0,
-          message: '上传成功'
-        })
-      }
-    }))
-    
-    const result = await convertApi.upload(files)
-    expect(result.code).toBe(0)
-  })
-})
-```
-
----
-
-## 10. 禁止事项清单
-
-| ❌ 禁止 | ✅ 替代方案 |
-|--------|-----------|
-| 手动解析文件头 | 使用 `FileHeaderChecker` 类 |
-| 直接拼接文件路径 | 使用 `get_safe_path()` 函数 |
-| 硬编码配置值 | 使用 `settings` 配置类 |
-| 直接调用 `subprocess` | 封装到 `Service` 类中 |
-| 返回原始异常 | 使用统一响应格式 |
-| 在前端存储敏感信息 | 所有敏感数据在后端处理 |
-| 使用 `eval/exec` | 使用安全解析库 |
-| 直接操作文件系统 | 使用 `FileService` 封装 |
-| 忽略日志记录 | 所有关键操作记录日志 |
-| 使用云存储/云服务 | 全部本地存储 |
-
----
-
-## 11. 开发检查清单
-
-### 11.1 提交前检查
-
-- [ ] 代码符合规范，已通过 linter
-- [ ] 添加了必要的日志记录
-- [ ] 错误处理完整，使用统一响应格式
-- [ ] 文件操作使用了安全函数
-- [ ] 没有硬编码配置值，已移至环境变量
-- [ ] 添加了单元测试
-- [ ] 没有遗留的 console.log 或 print
-
-### 11.2 代码审查要点
-
-- [ ] 是否使用了成熟组件库
-- [ ] 是否有重复造轮子的代码
-- [ ] 文件上传是否有完整验证
-- [ ] 路径处理是否安全
-- [ ] 日志是否完整
-- [ ] 配置是否从环境变量读取
-- [ ] 错误处理是否统一
-- [ ] 类型定义是否完整
-
----
-
-## 12. 附录
-
-### 12.1 依赖版本锁定
-
-```
-# backend/requirements.txt
-fastapi==0.109.0
-uvicorn==0.27.0
-python-multipart==0.0.6
-python-magic==0.4.27
-loguru==0.7.0
-pydantic-settings==2.1.0
-python-jose==3.3.0
-```
-
-### 12.2 参考文档
-
-| 文档 | 链接 |
-|------|------|
-| FastAPI 官方文档 | https://fastapi.tiangolo.com/ |
-| Vue 3 官方文档 | https://vuejs.org/ |
-| Element Plus 文档 | https://element-plus.org/ |
-| silk-v3-decoder | https://github.com/kn007/silk-v3-decoder |
-| ffmpeg 文档 | https://ffmpeg.org/documentation.html |
-
----
-
-## 13. 文档协同与变更流程
-
-### 13.1 文档优先级
-
-1. **development.md**：技术规范优先级最高
-   - 定义技术栈、目录结构、API 风格、配置方式、安全规范、部署口径
-2. **PRD.md**：产品需求文档
-   - 定义需求边界与业务验收标准
-3. **ui.md**：UI 设计规范
-   - 定义视觉交互与组件表现
-
-**任何功能、接口、配置、部署、安全实现，必须先满足本技术规范。**
-
-### 13.2 跨文档同步规则
-
-1. 当接口结构、字段命名、状态枚举变化时：先更新 development.md，再同步 PRD.md 与 ui.md
-2. 当新增业务能力时：先更新 PRD.md，再补充 development.md，最后更新 ui.md
-3. 当仅视觉风格变化时：更新 ui.md，同时检查 PRD.md 与 development.md 引用是否失效
-
-### 13.3 联动验收清单
-
-- [ ] API 路径风格保持一致（路径参数统一使用花括号）
-- [ ] 统一响应结构保持一致（code/message/data）
-- [ ] 配置来源保持一致（环境变量 + settings）
-- [ ] 部署口径保持一致（根目录 docker-compose.yml + backend/frontend 服务）
-- [ ] UI 展示状态与后端状态枚举一致
-
----
-
-**本文档是开发的权威指南，所有团队成员必须严格遵守。**
