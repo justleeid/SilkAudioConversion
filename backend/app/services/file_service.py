@@ -1,175 +1,183 @@
 """
-文件上传服务
-参考 development.md 第 6.1 节、PRD.md 第 2.1.1 节
+文件上传和验证服务
+参考 development.md 第 4.2.1 节、PRD.md 第 2.1.1 节
 """
 import uuid
+import mimetypes
 from pathlib import Path
-from typing import List
-from fastapi import UploadFile
+from typing import List, Dict
+from pydantic import BaseModel
 from app.config import settings
 from app.logger import logger
-from app.utils.path_security import get_safe_path, sanitize_filename
-from app.models.upload import FileValidationResult
-from app.models.convert import FileInfo
 
-# 简单的文件类型检测（基于文件头）
-def detect_file_type(content: bytes) -> str:
-    """基于文件头检测文件类型"""
-    if content.startswith(b'\x02#!silk_v3') or content.startswith(b'#!silk_v3'):
-        return 'audio/silk'
-    elif content.startswith(b'RIFF') and b'WAVE' in content[:12]:
-        return 'audio/wav'
-    elif content.startswith(b'\xff\xfb') or content.startswith(b'ID3'):
-        return 'audio/mpeg'
-    elif content.startswith(b'#!AMR'):
-        return 'audio/amr'
-    return 'application/octet-stream'
+
+class FileValidationResult(BaseModel):
+    """文件验证结果"""
+    task_id: str
+    filename: str
+    file_size: int
+    file_type: str
+
+
+class FileInfo(BaseModel):
+    """文件信息"""
+    task_id: str
+    filename: str
+    file_size: int
+    file_type: str
+    upload_url: str
 
 
 class FileService:
-    """文件上传处理服务"""
+    """文件服务"""
 
-    ALLOWED_EXTENSIONS = {'.silk', '.wav', '.mp3', '.amr'}
+    # 支持的文件扩展名
+    ALLOWED_EXTENSIONS = {'.silk', '.wav', '.mp3', '.amr', '.m4a'}
+
+    # 支持的 MIME 类型
     ALLOWED_MIME_TYPES = {
-        'audio/x-silk', 'audio/silk',
-        'audio/wav', 'audio/x-wav', 'audio/wave',
-        'audio/mpeg', 'audio/mp3',
-        'audio/amr', 'audio/x-amr'
+        'audio/silk',
+        'audio/x-silk',
+        'audio/wav',
+        'audio/x-wav',
+        'audio/mpeg',
+        'audio/mp3',
+        'audio/amr',
+        'audio/amr-wb',
+        'audio/mp4',  # for M4A
     }
 
     def __init__(self):
         self.upload_dir = Path(settings.upload_dir)
-        self.max_file_size = settings.max_file_size
-        self.max_file_count = settings.max_file_count
-
-        # 确保上传目录存在
         self.upload_dir.mkdir(parents=True, exist_ok=True)
 
-    def validate_file(self, file: UploadFile) -> FileValidationResult:
+    def detect_file_type(self, file_path: Path) -> str:
         """
-        验证上传文件
+        检测文件类型
 
         Args:
-            file: 上传的文件对象
+            file_path: 文件路径
 
         Returns:
-            验证结果
+            文件类型（扩展名或 MIME 类型）
         """
         try:
-            # 1. 检查文件扩展名
-            file_ext = Path(file.filename).suffix.lower()
-            if file_ext not in self.ALLOWED_EXTENSIONS:
-                logger.warning(f"不支持的文件扩展名: {file_ext}")
-                return FileValidationResult(
-                    is_valid=False,
-                    error_message=f"不支持的文件格式: {file_ext}"
-                )
+            with open(file_path, 'rb') as f:
+                header = f.read(12)
 
-            # 2. 检查文件大小
-            content = file.file.read()
-            file.file.seek(0)  # 重置文件指针
+            # SILK 格式检测
+            if header.startswith(b'\x02#!SILK_V3'):  # 微信格式
+                return 'audio/silk'
+            if header.startswith(b'#!SILK_V3'):  # 标准格式
+                return 'audio/silk'
 
-            file_size = len(content)
-            if file_size > self.max_file_size:
-                size_mb = file_size / (1024 * 1024)
-                max_mb = self.max_file_size / (1024 * 1024)
-                logger.warning(f"文件过大: {size_mb:.2f}MB > {max_mb:.0f}MB")
-                return FileValidationResult(
-                    is_valid=False,
-                    error_message=f"文件过大，最大 {max_mb:.0f}MB"
-                )
+            # WAV 格式检测
+            if header.startswith(b'RIFF') and b'WAVE' in header:
+                return 'audio/wav'
 
-            # 3. 检查文件魔数（MIME 类型）
-            file_type = detect_file_type(content[:1024])
+            # MP3 格式检测
+            if header.startswith(b'\xff\xfb') or header.startswith(b'ID3'):
+                return 'audio/mpeg'
 
-            # 验证文件类型
-            if not any(t in file_type for t in self.ALLOWED_MIME_TYPES):
-                logger.warning(f"文件内容与扩展名不匹配: {file_type}")
-                return FileValidationResult(
-                    is_valid=False,
-                    error_message=f"文件内容与扩展名不匹配"
-                )
+            # AMR 格式检测
+            if header.startswith(b'#!AMR'):
+                return 'audio/amr'
 
-            logger.info(f"✅ 文件验证通过: {file.filename}")
-            return FileValidationResult(is_valid=True)
+            # M4A/MP4 格式检测（ftyp signature at offset 4-8）
+            if len(header) >= 12 and header[4:8] == b'ftyp':
+                return 'audio/mp4'
+
+            # 默认使用系统识别
+            mime_type, _ = mimetypes.guess_type(str(file_path))
+            return mime_type or 'application/octet-stream'
 
         except Exception as e:
-            logger.error(f"文件验证失败: {str(e)}")
-            return FileValidationResult(
-                is_valid=False,
-                error_message=f"文件验证失败: {str(e)}"
-            )
+            logger.warning(f"文件类型检测失败: {str(e)}")
+            return 'application/octet-stream'
 
-    async def save_upload(self, file: UploadFile) -> FileInfo:
+    def validate_file(self, file_path: Path) -> bool:
         """
-        保存上传文件
+        验证文件
 
         Args:
-            file: 上传的文件对象
+            file_path: 文件路径
 
         Returns:
-            文件信息
+            是否验证通过
         """
-        try:
-            # 生成幋一任务 ID
-            task_id = uuid.uuid4().hex
+        # 检查扩展名
+        if file_path.suffix.lower() not in self.ALLOWED_EXTENSIONS:
+            logger.warning(f"不支持的文件扩展名: {file_path.suffix}")
+            return False
 
-            # 清理文件名
-            safe_filename = sanitize_filename(file.filename)
+        # 检查文件类型
+        file_type = self.detect_file_type(file_path)
+        if file_type not in self.ALLOWED_MIME_TYPES:
+            logger.warning(f"不支持的 MIME 类型: {file_type}")
+            return False
 
-            # 生成安全路径
-            file_path = get_safe_path(self.upload_dir, f"{task_id}_{safe_filename}")
+        # 检查文件大小
+        file_size = file_path.stat().st_size
+        max_size = settings.max_upload_size
+        if file_size > max_size:
+            logger.warning(f"文件过大: {file_size} > {max_size}")
+            return False
 
-            # 保存文件
-            content = await file.read()
-            with open(file_path, 'wb') as f:
-                f.write(content)
+        return True
 
-            # 获取文件格式
-            file_ext = Path(file.filename).suffix.lower().replace('.', '')
-
-            logger.info(f"✅ 文件保存成功: {file_path}")
-
-            return FileInfo(
-                task_id=task_id,
-                filename=file.filename,
-                size=len(content),
-                format=file_ext.upper()
-            )
-
-        except Exception as e:
-            logger.error(f"文件保存失败: {str(e)}")
-            raise
-
-    async def upload_and_validate(
-        self,
-        files: List[UploadFile]
-    ) -> List[FileInfo]:
+    async def upload_and_validate(self, files: list) -> List[FileInfo]:
         """
-        批量上传并验证文件
+        上传并验证文件
 
         Args:
-            files: 上传文件列表
+            files: 上传文件列表（FastAPI UploadFile 对象）
 
         Returns:
-            验证通过的文件信息列表
-        """
-        if len(files) > self.max_file_count:
-            raise ValueError(f"文件数量超过限制: {self.max_file_count}")
+            验证成功的文件信息列表
 
+        Raises:
+            Exception: 上传失败
+        """
         validated_files = []
 
         for file in files:
-            # 验证文件
-            result = self.validate_file(file)
+            try:
+                # 生成任务 ID
+                task_id = str(uuid.uuid4())
 
-            if not result.is_valid:
-                logger.warning(f"文件验证失败: {file.filename} - {result.error_message}")
-                continue
+                # 保存文件
+                file_path = self.upload_dir / f"{task_id}_{file.filename}"
+                content = await file.read()
 
-            # 保存文件
-            file_info = await self.save_upload(file)
-            validated_files.append(file_info)
+                with open(file_path, 'wb') as f:
+                    f.write(content)
 
-        logger.info(f"✅ 成功上传 {len(validated_files)}/{len(files)} 个文件")
+                logger.info(f"文件已上传: {file_path}")
+
+                # 验证文件
+                if not self.validate_file(file_path):
+                    file_path.unlink()
+                    logger.error(f"文件验证失败: {file.filename}")
+                    raise ValueError(f"不支持的文件格式: {file.filename}")
+
+                # 获取文件类型
+                file_type = self.detect_file_type(file_path)
+                file_size = file_path.stat().st_size
+
+                file_info = FileInfo(
+                    task_id=task_id,
+                    filename=file.filename,
+                    file_size=file_size,
+                    file_type=file_type,
+                    upload_url=f"/api/download/{task_id}"
+                )
+
+                validated_files.append(file_info)
+
+                logger.info(f"✅ 文件验证成功: {file.filename} (task_id: {task_id})")
+
+            except Exception as e:
+                logger.error(f"❌ 文件上传失败: {file.filename} - {str(e)}")
+                raise
+
         return validated_files
