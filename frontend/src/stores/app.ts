@@ -1,165 +1,139 @@
-/**
- * 应用状态管理
- * 参考 development.md 第 2.1 节（Pinia）
- */
-import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-import type { FileInfo, TaskInfo, ConvertParams } from '@/types'
-import { upload, convert, queryStatus } from '@/api/convert'
-import { TaskStatus } from '@/types'
+import { defineStore } from 'pinia';
+import { ref, computed } from 'vue';
+import { FileInfo, TaskInfo, TaskStatus } from '@/types';
+import * as convertApi from '@/api/convert';
 
 export const useAppStore = defineStore('app', () => {
-  // 状态
-  const files = ref<FileInfo[]>([])
-  const tasks = ref<Map<string, TaskInfo>>(new Map())
-  const uploading = ref(false)
-  const converting = ref(false)
+  // 已上传的文件列表
+  const files = ref<FileInfo[]>([]);
 
-  // 计算属性
-  const hasFiles = computed(() => files.value.length > 0)
-  const completedTasks = computed(() =>
-    Array.from(tasks.value.values()).filter((t) => t.status === TaskStatus.COMPLETED)
-  )
-  const activeTasks = computed(() =>
-    Array.from(tasks.value.values()).filter(
-      (t) => t.status === TaskStatus.PENDING || t.status === TaskStatus.PROCESSING
-    )
-  )
+  // 转换任务列表
+  const tasks = ref<Map<string, TaskInfo>>(new Map());
 
-  // Actions
+  // PLIST 合并中选中的文件 ID
+  const selectedForPlist = ref<Set<string>>(new Set());
+
   /**
    * 上传文件
    */
-  async function uploadFiles(fileList: File[]) {
-    try {
-      uploading.value = true
-      const response = await upload(fileList)
-
-      if (response.data) {
-        files.value.push(...response.data.files)
-        // 初始化任务状态
-        response.data.files.forEach((file) => {
-          tasks.value.set(file.task_id, {
-            task_id: file.task_id,
-            status: TaskStatus.PENDING,
-            progress: 0
-          })
-        })
-      }
-
-      return true
-    } catch (error) {
-      console.error('上传失败:', error)
-      return false
-    } finally {
-      uploading.value = false
+  async function uploadFiles(fileList: FileList) {
+    const filesToUpload: File[] = [];
+    for (let i = 0; i < fileList.length; i++) {
+      filesToUpload.push(fileList[i]);
     }
+
+    const response = await convertApi.upload(filesToUpload);
+    if (response.code === 0 && response.data?.files) {
+      files.value = response.data.files;
+
+      // 为每个上传的文件创建任务
+      response.data.files.forEach(file => {
+        tasks.value.set(file.task_id, {
+          task_id: file.task_id,
+          status: TaskStatus.PENDING,
+          progress: 0,
+        });
+      });
+    }
+
+    return response;
   }
 
   /**
    * 开始转换
    */
-  async function startConversion(taskId: string, params: ConvertParams) {
-    try {
-      converting.value = true
-      const response = await convert(taskId, params)
+  async function convert(taskId: string, targetFormat: string) {
+    const response = await convertApi.convert(taskId, {
+      target_format: targetFormat,
+      wechat_compatible: true,
+    });
 
-      if (response.data) {
-        // 更新任务状态
-        const task = tasks.value.get(taskId)
-        if (task) {
-          task.status = TaskStatus.PROCESSING
+    if (response.code === 0) {
+      const task = tasks.value.get(taskId);
+      if (task) {
+        task.status = TaskStatus.PROCESSING;
+        task.progress = 0;
+
+        // 定期查询状态
+        queryStatusPeriodically(taskId);
+      }
+    }
+
+    return response;
+  }
+
+  /**
+   * 定期查询任务状态
+   */
+  function queryStatusPeriodically(taskId: string, interval = 1000, maxRetries = 100) {
+    let retries = 0;
+
+    const timer = setInterval(async () => {
+      const response = await convertApi.queryStatus(taskId);
+
+      if (response.code === 0 && response.data) {
+        const taskInfo = response.data;
+        tasks.value.set(taskId, taskInfo);
+
+        // 如果任务完成或失败，停止轮询
+        if (
+          taskInfo.status === TaskStatus.COMPLETED ||
+          taskInfo.status === TaskStatus.FAILED
+        ) {
+          clearInterval(timer);
         }
-
-        // 开始轮读状态
-        pollTaskStatus(taskId)
       }
 
-      return true
-    } catch (error) {
-      console.error('转换失败:', error)
-      return false
-    } finally {
-      converting.value = false
-    }
-  }
-
-  /**
-   * 轮读任务状态
-   */
-  async function pollTaskStatus(taskId: string) {
-    const poll = async () => {
-      try {
-        const response = await queryStatus(taskId)
-
-        if (response.data) {
-          tasks.value.set(taskId, response.data)
-
-          // 如果任务仍在进行，继续轮读
-          if (
-            response.data.status === TaskStatus.PENDING ||
-            response.data.status === TaskStatus.PROCESSING
-          ) {
-            setTimeout(poll, 1000)
-          }
-        }
-      } catch (error) {
-        console.error('查询状态失败:', error)
+      retries++;
+      if (retries >= maxRetries) {
+        clearInterval(timer);
       }
+    }, interval);
+  }
+
+  /**
+   * 下载文件
+   */
+  function downloadFile(taskId: string) {
+    convertApi.download(taskId);
+  }
+
+  /**
+   * 选择所有 PLIST 文件
+   */
+  function selectAllForPlist() {
+    files.value.forEach(file => {
+      selectedForPlist.value.add(file.task_id);
+    });
+  }
+
+  /**
+   * 清除 PLIST 选择
+   */
+  function clearPlistSelection() {
+    selectedForPlist.value.clear();
+  }
+
+  /**
+   * 切换文件选择
+   */
+  function togglePlistSelection(taskId: string) {
+    if (selectedForPlist.value.has(taskId)) {
+      selectedForPlist.value.delete(taskId);
+    } else {
+      selectedForPlist.value.add(taskId);
     }
-
-    await poll()
-  }
-
-  /**
-   * 移除文件
-   */
-  function removeFile(taskId: string) {
-    const index = files.value.findIndex((f) => f.task_id === taskId)
-    if (index > -1) {
-      files.value.splice(index, 1)
-    }
-    tasks.value.delete(taskId)
-  }
-
-  /**
-   * 清除已完成的任务
-   */
-  function clearCompletedTasks() {
-    completedTasks.value.forEach((task) => {
-      tasks.value.delete(task.task_id)
-      const index = files.value.findIndex((f) => f.task_id === task.task_id)
-      if (index > -1) {
-        files.value.splice(index, 1)
-      }
-    })
-  }
-
-  /**
-   * 重置状态
-   */
-  function reset() {
-    files.value = []
-    tasks.value.clear()
-    uploading.value = false
-    converting.value = false
   }
 
   return {
-    // 状态
     files,
     tasks,
-    uploading,
-    converting,
-    // 计算属性
-    hasFiles,
-    completedTasks,
-    activeTasks,
-    // Actions
+    selectedForPlist,
     uploadFiles,
-    startConversion,
-    removeFile,
-    clearCompletedTasks,
-    reset
-  }
-})
+    convert,
+    downloadFile,
+    selectAllForPlist,
+    clearPlistSelection,
+    togglePlistSelection,
+  };
+});
