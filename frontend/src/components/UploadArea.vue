@@ -6,7 +6,7 @@
       :auto-upload="false"
       :show-file-list="false"
       :on-change="handleFileChange"
-      accept=".silk,.wav,.mp3,.amr"
+      accept=".silk,.wav,.mp3,.amr,.m4a"
     >
       <el-icon class="el-icon--upload"><upload-filled /></el-icon>
       <div class="el-upload__text">
@@ -14,7 +14,7 @@
       </div>
       <template #tip>
         <div class="el-upload__tip">
-          支持 SILK、WAV、MP3、AMR 格式，单个文件最大 50MB，最多 50 个文件
+          支持 SILK、WAV、MP3、AMR、M4A 格式，单个文件最大 50MB，最多 50 个文件
         </div>
       </template>
     </el-upload>
@@ -75,7 +75,7 @@ async function handleFileChange(file: any) {
 
   // 验证文件格式
   const ext = file.name.split('.').pop()?.toLowerCase()
-  if (!['silk', 'wav', 'mp3', 'amr'].includes(ext)) {
+  if (!['silk', 'wav', 'mp3', 'amr', 'm4a'].includes(ext)) {
     ElMessage.error(`不支持的文件格式: ${ext}`)
     return
   }

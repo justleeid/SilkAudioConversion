@@ -33,7 +33,10 @@
 
     <!-- Footer -->
     <footer class="footer">
-      <p>Silk Audio Converter © 2026</p>
+      <div class="container">
+        <StagingPanel />
+      </div>
+      <p style="margin-top: 16px;">Silk Audio Converter © 2026</p>
     </footer>
   </div>
 </template>
@@ -42,6 +45,7 @@
 import UploadArea from '@/components/UploadArea.vue'
 import ConvertSettings from '@/components/ConvertSettings.vue'
 import TaskList from '@/components/TaskList.vue'
+import StagingPanel from '@/components/StagingPanel.vue'
 </script>
 
 <style scoped>

@@ -31,12 +31,13 @@ class FileHeaderChecker:
 
     def is_silk(self) -> bool:
         """检查是否为 SILK 格式"""
-        return (self.data.startswith(self.SILK_STANDARD_HEADER) or
-                self.data.startswith(self.SILK_WECHAT_HEADER))
+        data_lower = self.data.lower()
+        return (data_lower.startswith(self.SILK_STANDARD_HEADER) or
+                data_lower.startswith(self.SILK_WECHAT_HEADER))
 
     def is_wechat_silk(self) -> bool:
         """检查是否为微信 SILK 格式（带 0x02 头）"""
-        return self.data.startswith(self.SILK_WECHAT_HEADER)
+        return self.data.lower().startswith(self.SILK_WECHAT_HEADER)
 
     @staticmethod
     def normalize_silk(input_path: Path, output_path: Path) -> None:
@@ -50,8 +51,8 @@ class FileHeaderChecker:
         with open(input_path, 'rb') as f:
             data = f.read()
 
-        # 移除微信头
-        if data.startswith(FileHeaderChecker.SILK_WECHAT_HEADER):
+        # 移除微信头（大小写不敏感）
+        if data[:10].lower().startswith(FileHeaderChecker.SILK_WECHAT_HEADER):
             data = data[1:]  # 移除 0x02
             logger.info(f"移除微信 SILK 文件头: {input_path}")
 

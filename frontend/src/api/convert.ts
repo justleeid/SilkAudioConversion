@@ -53,3 +53,60 @@ export function download(taskId: string): string {
   const baseUrl = import.meta.env.DEV ? '' : window.location.origin
   return `${baseUrl}/api/download/${taskId}`
 }
+
+/**
+ * 合并 SILK 为 PLIST
+ */
+export async function mergePlist(params: {
+  task_ids: string[]
+  output_filename?: string
+}): Promise<ApiResponse<{ file_id: string; filename: string; download_url: string }>> {
+  const response = await client.post<ApiResponse<{ file_id: string; filename: string; download_url: string }>>(
+    '/api/plist/merge',
+    params
+  )
+  return response.data
+}
+
+/**
+ * 从 PLIST 提取 SILK
+ */
+export async function extractPlist(fileId: string): Promise<ApiResponse<{ count: number; output_dir: string; files: string[] }>> {
+  const response = await client.post<ApiResponse<{ count: number; output_dir: string; files: string[] }>>(
+    '/api/plist/extract',
+    { plist_file_id: fileId }
+  )
+  return response.data
+}
+
+/**
+ * 查询暂存区
+ */
+export async function getStaging(): Promise<ApiResponse<{ files: import('@/types').StagingFile[]; stats: import('@/types').StagingStats }>> {
+  const response = await client.get<ApiResponse<{ files: import('@/types').StagingFile[]; stats: import('@/types').StagingStats }>>('/api/staging')
+  return response.data
+}
+
+/**
+ * 删除暂存文件
+ */
+export async function deleteStagingFile(fileId: string): Promise<ApiResponse<null>> {
+  const response = await client.delete<ApiResponse<null>>(`/api/staging/${fileId}`)
+  return response.data
+}
+
+/**
+ * 清理过期暂存文件
+ */
+export async function cleanupStaging(): Promise<ApiResponse<{ cleaned: number }>> {
+  const response = await client.post<ApiResponse<{ cleaned: number }>>('/api/staging/cleanup')
+  return response.data
+}
+
+/**
+ * 获取应用配置
+ */
+export async function getConfig(): Promise<ApiResponse<import('@/types').AppConfig>> {
+  const response = await client.get<ApiResponse<import('@/types').AppConfig>>('/api/config')
+  return response.data
+}

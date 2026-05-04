@@ -14,6 +14,7 @@ export const useAppStore = defineStore('app', () => {
   const tasks = ref<Map<string, TaskInfo>>(new Map())
   const uploading = ref(false)
   const converting = ref(false)
+  const selectedForPlist = ref<Set<string>>(new Set())  // PLIST 模式下选中的文件 ID
 
   // 计算属性
   const hasFiles = computed(() => files.value.length > 0)
@@ -143,6 +144,33 @@ export const useAppStore = defineStore('app', () => {
     tasks.value.clear()
     uploading.value = false
     converting.value = false
+    selectedForPlist.value.clear()
+  }
+
+  /**
+   * 切换 PLIST 文件选择
+   */
+  function togglePlistSelection(taskId: string) {
+    if (selectedForPlist.value.has(taskId)) {
+      selectedForPlist.value.delete(taskId)
+    } else {
+      selectedForPlist.value.add(taskId)
+    }
+  }
+
+  /**
+   * 全选 SILK 文件
+   */
+  function selectAllSilkForPlist() {
+    const silkFiles = files.value.filter((f) => f.format.toLowerCase() === 'silk')
+    silkFiles.forEach((f) => selectedForPlist.value.add(f.task_id))
+  }
+
+  /**
+   * 清除 PLIST 文件选择
+   */
+  function clearPlistSelection() {
+    selectedForPlist.value.clear()
   }
 
   return {
@@ -151,6 +179,7 @@ export const useAppStore = defineStore('app', () => {
     tasks,
     uploading,
     converting,
+    selectedForPlist,
     // 计算属性
     hasFiles,
     completedTasks,
@@ -160,6 +189,9 @@ export const useAppStore = defineStore('app', () => {
     startConversion,
     removeFile,
     clearCompletedTasks,
-    reset
+    reset,
+    togglePlistSelection,
+    selectAllSilkForPlist,
+    clearPlistSelection
   }
 })

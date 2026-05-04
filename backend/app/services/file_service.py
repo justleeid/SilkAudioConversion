@@ -15,7 +15,9 @@ from app.models.convert import FileInfo
 # 简单的文件类型检测（基于文件头）
 def detect_file_type(content: bytes) -> str:
     """基于文件头检测文件类型"""
-    if content.startswith(b'\x02#!silk_v3') or content.startswith(b'#!silk_v3'):
+    silk_header_lower = content[:10].lower()
+    if (silk_header_lower.startswith(b'\x02#!silk_v3') or
+            content[:9].lower().startswith(b'#!silk_v3')):
         return 'audio/silk'
     elif content.startswith(b'RIFF') and b'WAVE' in content[:12]:
         return 'audio/wav'
@@ -23,18 +25,21 @@ def detect_file_type(content: bytes) -> str:
         return 'audio/mpeg'
     elif content.startswith(b'#!AMR'):
         return 'audio/amr'
+    elif len(content) >= 12 and content[4:8] == b'ftyp':
+        return 'audio/mp4'
     return 'application/octet-stream'
 
 
 class FileService:
     """文件上传处理服务"""
 
-    ALLOWED_EXTENSIONS = {'.silk', '.wav', '.mp3', '.amr'}
+    ALLOWED_EXTENSIONS = {'.silk', '.wav', '.mp3', '.amr', '.m4a'}
     ALLOWED_MIME_TYPES = {
         'audio/x-silk', 'audio/silk',
         'audio/wav', 'audio/x-wav', 'audio/wave',
         'audio/mpeg', 'audio/mp3',
         'audio/amr', 'audio/x-amr'
+        , 'audio/mp4', 'audio/m4a', 'audio/x-m4a'
     }
 
     def __init__(self):

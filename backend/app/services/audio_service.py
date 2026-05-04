@@ -346,3 +346,321 @@ class AudioService:
         except Exception as e:
             logger.error(f"❌ MP3 转 SILK 失败: {str(e)}")
             return False
+
+    async def amr_to_wav(
+        self,
+        amr_path: Path,
+        output_path: Path,
+        sample_rate: int = 24000
+    ) -> bool:
+        """
+        AMR 转换为 WAV
+
+        Args:
+            amr_path: AMR 文件路径
+            output_path: 输出 WAV 文件路径
+            sample_rate: 采样率
+
+        Returns:
+            是否成功
+        """
+        try:
+            logger.info(f"开始 AMR 转 WAV: {amr_path}")
+
+            # 使用 ffmpeg 将 AMR 转为 WAV
+            cmd_ffmpeg = [
+                'ffmpeg', '-y',
+                '-i', str(amr_path),
+                '-ar', str(sample_rate),
+                '-ac', '1',
+                str(output_path)
+            ]
+
+            logger.debug(f"执行 ffmpeg 命令: {' '.join(cmd_ffmpeg)}")
+            process = await asyncio.create_subprocess_exec(
+                *cmd_ffmpeg,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+
+            if process.returncode != 0:
+                logger.error(f"AMR 转 WAV 失败: {stderr.decode()}")
+                return False
+
+            logger.info(f"✅ AMR 转 WAV 成功: {output_path}")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ AMR 转 WAV 失败: {str(e)}")
+            return False
+
+    async def amr_to_mp3(
+        self,
+        amr_path: Path,
+        output_path: Path,
+        sample_rate: int = 24000,
+        bit_rate: int = 128000
+    ) -> bool:
+        """
+        AMR 转换为 MP3
+
+        Args:
+            amr_path: AMR 文件路径
+            output_path: 输出 MP3 文件路径
+            sample_rate: 采样率
+            bit_rate: MP3 比特率
+
+        Returns:
+            是否成功
+        """
+        try:
+            logger.info(f"开始 AMR 转 MP3: {amr_path}")
+
+            # 1. 先转 WAV
+            wav_path = self.temp_dir / f"{amr_path.stem}.wav"
+            success = await self.amr_to_wav(amr_path, wav_path, sample_rate)
+
+            if not success:
+                return False
+
+            # 2. WAV 转 MP3
+            cmd_ffmpeg = [
+                'ffmpeg', '-y',
+                '-i', str(wav_path),
+                '-codec:a', 'libmp3lame',
+                '-b:a', f'{bit_rate // 1000}k',
+                str(output_path)
+            ]
+
+            logger.debug(f"执行 ffmpeg 命令: {' '.join(cmd_ffmpeg)}")
+            process = await asyncio.create_subprocess_exec(
+                *cmd_ffmpeg,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+
+            if process.returncode != 0:
+                logger.error(f"WAV 转 MP3 失败: {stderr.decode()}")
+                return False
+
+            logger.info(f"✅ AMR 转 MP3 成功: {output_path}")
+
+            # 3. 清理临时文件
+            wav_path.unlink(missing_ok=True)
+
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ AMR 转 MP3 失败: {str(e)}")
+            return False
+
+    async def amr_to_silk(
+        self,
+        amr_path: Path,
+        output_path: Path,
+        sample_rate: int = 24000,
+        bit_rate: int = 24000,
+        frame_size: int = 20,
+        wechat_compatible: bool = True
+    ) -> bool:
+        """
+        AMR 转换为 SILK
+
+        Args:
+            amr_path: AMR 文件路径
+            output_path: 输出 SILK 文件路径
+            sample_rate: 采样率
+            bit_rate: 比特率
+            frame_size: 帧大小
+            wechat_compatible: 是否输出微信兼容格式
+
+        Returns:
+            是否成功
+        """
+        try:
+            logger.info(f"开始 AMR 转 SILK: {amr_path}")
+
+            # 1. 先转 WAV
+            wav_path = self.temp_dir / f"{amr_path.stem}.wav"
+            success = await self.amr_to_wav(amr_path, wav_path, sample_rate)
+
+            if not success:
+                return False
+
+            # 2. WAV 转 SILK
+            success = await self.wav_to_silk(
+                wav_path,
+                output_path,
+                sample_rate,
+                bit_rate,
+                frame_size,
+                wechat_compatible
+            )
+
+            # 3. 清理临时文件
+            wav_path.unlink(missing_ok=True)
+
+            if success:
+                logger.info(f"✅ AMR 转 SILK 成功: {output_path}")
+            else:
+                logger.error(f"❌ AMR 转 SILK 失败")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"❌ AMR 转 SILK 失败: {str(e)}")
+            return False
+
+    async def m4a_to_wav(
+        self,
+        m4a_path: Path,
+        output_path: Path,
+        sample_rate: int = 24000
+    ) -> bool:
+        """
+        M4A 转换为 WAV
+
+        Args:
+            m4a_path: M4A 文件路径
+            output_path: 输出 WAV 文件路径
+            sample_rate: 采样率
+
+        Returns:
+            是否成功
+        """
+        try:
+            logger.info(f"开始 M4A 转 WAV: {m4a_path}")
+
+            cmd_ffmpeg = [
+                'ffmpeg', '-y',
+                '-i', str(m4a_path),
+                '-ar', str(sample_rate),
+                '-ac', '1',
+                str(output_path)
+            ]
+
+            logger.debug(f"执行 ffmpeg 命令: {' '.join(cmd_ffmpeg)}")
+            process = await asyncio.create_subprocess_exec(
+                *cmd_ffmpeg,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+
+            if process.returncode != 0:
+                logger.error(f"M4A 转 WAV 失败: {stderr.decode()}")
+                return False
+
+            logger.info(f"✅ M4A 转 WAV 成功: {output_path}")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ M4A 转 WAV 失败: {str(e)}")
+            return False
+
+    async def m4a_to_mp3(
+        self,
+        m4a_path: Path,
+        output_path: Path,
+        sample_rate: int = 24000,
+        bit_rate: int = 128000
+    ) -> bool:
+        """
+        M4A 转换为 MP3
+
+        Args:
+            m4a_path: M4A 文件路径
+            output_path: 输出 MP3 文件路径
+            sample_rate: 采样率
+            bit_rate: MP3 比特率
+
+        Returns:
+            是否成功
+        """
+        try:
+            logger.info(f"开始 M4A 转 MP3: {m4a_path}")
+
+            cmd_ffmpeg = [
+                'ffmpeg', '-y',
+                '-i', str(m4a_path),
+                '-ar', str(sample_rate),
+                '-ac', '1',
+                '-codec:a', 'libmp3lame',
+                '-b:a', f'{bit_rate // 1000}k',
+                str(output_path)
+            ]
+
+            logger.debug(f"执行 ffmpeg 命令: {' '.join(cmd_ffmpeg)}")
+            process = await asyncio.create_subprocess_exec(
+                *cmd_ffmpeg,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+
+            if process.returncode != 0:
+                logger.error(f"M4A 转 MP3 失败: {stderr.decode()}")
+                return False
+
+            logger.info(f"✅ M4A 转 MP3 成功: {output_path}")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ M4A 转 MP3 失败: {str(e)}")
+            return False
+
+    async def m4a_to_silk(
+        self,
+        m4a_path: Path,
+        output_path: Path,
+        sample_rate: int = 24000,
+        bit_rate: int = 24000,
+        frame_size: int = 20,
+        wechat_compatible: bool = True
+    ) -> bool:
+        """
+        M4A 转换为 SILK
+
+        Args:
+            m4a_path: M4A 文件路径
+            output_path: 输出 SILK 文件路径
+            sample_rate: 采样率
+            bit_rate: 比特率
+            frame_size: 帧大小
+            wechat_compatible: 是否输出微信兼容格式
+
+        Returns:
+            是否成功
+        """
+        try:
+            logger.info(f"开始 M4A 转 SILK: {m4a_path}")
+
+            wav_path = self.temp_dir / f"{m4a_path.stem}.wav"
+            success = await self.m4a_to_wav(m4a_path, wav_path, sample_rate)
+
+            if not success:
+                return False
+
+            success = await self.wav_to_silk(
+                wav_path,
+                output_path,
+                sample_rate,
+                bit_rate,
+                frame_size,
+                wechat_compatible
+            )
+
+            wav_path.unlink(missing_ok=True)
+
+            if success:
+                logger.info(f"✅ M4A 转 SILK 成功: {output_path}")
+            else:
+                logger.error("❌ M4A 转 SILK 失败")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"❌ M4A 转 SILK 失败: {str(e)}")
+            return False

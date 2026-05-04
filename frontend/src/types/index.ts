@@ -73,3 +73,64 @@ export interface UploadProgress {
   total: number
   percentage: number
 }
+
+/**
+ * PLIST 合并请求
+ */
+export interface PlistMergeRequest {
+  task_ids: string[]
+  output_filename?: string
+  include_metadata?: boolean
+}
+
+/**
+ * PLIST 提取请求
+ */
+export interface PlistExtractRequest {
+  plist_file_id: string
+}
+
+/**
+ * 暂存区文件信息
+ */
+export interface StagingFile {
+  file_id: string
+  original_name: string
+  output_name: string
+  size: number
+  created_at: string
+  expires_at: string
+  download_url: string
+}
+
+/**
+ * 暂存区统计
+ */
+export interface StagingStats {
+  file_count: number
+  total_size: number
+  expire_hours: number
+  cleanup_interval: number
+}
+
+/**
+ * 暂存区响应
+ */
+export interface StagingResponse {
+  files: StagingFile[]
+  stats: StagingStats
+}
+
+/**
+ * 应用配置
+ */
+export interface AppConfig {
+  supported_formats: string[]
+  max_file_size: number
+  max_file_count: number
+  sample_rates: number[]
+  bit_rates: number[]
+  frame_sizes: number[]
+  cache_expire_hours: number
+  max_concurrent_tasks: number
+}

@@ -14,11 +14,54 @@
             <el-option label="WAV" :value="TargetFormat.WAV" />
             <el-option label="MP3" :value="TargetFormat.MP3" />
             <el-option label="SILK" :value="TargetFormat.SILK" />
+            <el-option label="PLIST" :value="TargetFormat.PLIST" />
           </el-select>
         </el-form-item>
 
-        <!-- 采样率 -->
-        <el-form-item label="采样率">
+        <!-- PLIST 专属提示 -->
+        <el-alert
+          v-if="settings.target_format === TargetFormat.PLIST"
+          title="PLIST 模式：将选中的 SILK 文件合并转换为 iOS 预定义语音格式"
+          type="info"
+          :closable="false"
+          show-icon
+        />
+
+        <!-- PLIST 模式下的 SILK 文件选择 -->
+        <div v-if="settings.target_format === TargetFormat.PLIST" class="plist-selection">
+          <el-form-item label="选择 SILK 文件">
+            <div class="silk-file-list">
+              <div v-if="silkFiles.length === 0" class="no-silk-files">
+                <el-empty description="没有可用的 SILK 文件，请先上传 SILK 文件" />
+              </div>
+              <div v-else class="selection-actions">
+                <el-checkbox-group v-model="checkedSilkIds">
+                  <div v-for="file in silkFiles" :key="file.task_id" class="silk-file-item">
+                    <el-checkbox :label="file.task_id">
+                      <span class="file-name">{{ file.filename }}</span>
+                      <el-tag size="small" :type="file.source === 'staging' ? 'success' : 'info'" class="file-source-tag">
+                        {{ file.source === 'staging' ? '暂存区' : '上传区' }}
+                      </el-tag>
+                      <span class="file-size">({{ formatFileSize(file.size) }})</span>
+                    </el-checkbox>
+                  </div>
+                </el-checkbox-group>
+              </div>
+              <div v-if="silkFiles.length > 0" class="selection-toolbar">
+                <el-button size="small" type="primary" @click="selectAllSilkFiles">
+                  全选
+                </el-button>
+                <el-button size="small" @click="store.clearPlistSelection">
+                  取消全选
+                </el-button>
+                <span class="selection-count">已选中 {{ checkedSilkIds.length }} 个文件</span>
+              </div>
+            </div>
+          </el-form-item>
+        </div>
+
+        <!-- 采样率（PLIST 外均可设） -->
+        <el-form-item v-if="settings.target_format !== TargetFormat.PLIST" label="采样率">
           <el-select v-model="settings.sample_rate" placeholder="选择采样率">
             <el-option label="8000 Hz" :value="8000" />
             <el-option label="16000 Hz" :value="16000" />
@@ -57,10 +100,10 @@
           <el-button
             type="primary"
             :loading="store.converting"
-            :disabled="!store.hasFiles || isConverting"
+            :disabled="isConvertDisabled"
             @click="handleConvert"
           >
-            开始转换
+            {{ settings.target_format === TargetFormat.PLIST ? '合并为 PLIST' : '开始转换' }}
           </el-button>
         </el-form-item>
       </el-form>
@@ -69,10 +112,12 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, computed } from 'vue'
+import { reactive, ref, computed, watch, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
+import type { StagingFile } from '@/types'
 import { TargetFormat, TaskStatus } from '@/types'
 import { ElMessage } from 'element-plus'
+import { mergePlist, getStaging } from '@/api/convert'
 
 const store = useAppStore()
 
@@ -85,6 +130,63 @@ const settings = reactive({
   wechat_compatible: true
 })
 
+// PLIST 输出文件名
+const plistFilename = ref('voices.plist')
+const stagingSilkFiles = ref<StagingFile[]>([])
+
+type PlistSelectableFile = {
+  task_id: string
+  filename: string
+  size: number
+  source: 'upload' | 'staging'
+}
+
+// PLIST 模式下选中的 SILK 文件 ID
+const checkedSilkIds = computed({
+  get: () => Array.from(store.selectedForPlist),
+  set: (newVal) => {
+    store.clearPlistSelection()
+    newVal.forEach((id) => store.togglePlistSelection(id))
+  }
+})
+
+// 上传区可用的 SILK 文件列表
+const uploadSilkFiles = computed<PlistSelectableFile[]>(() => {
+  return store.files
+    .filter((f) => {
+    const task = store.tasks.get(f.task_id)
+    return f.format.toLowerCase() === 'silk' && task?.status === TaskStatus.PENDING
+  })
+    .map((f) => ({
+      task_id: f.task_id,
+      filename: f.filename,
+      size: f.size,
+      source: 'upload' as const,
+    }))
+})
+
+// 暂存区可用的 SILK 文件列表
+const stagingSelectableSilkFiles = computed<PlistSelectableFile[]>(() => {
+  return stagingSilkFiles.value.map((f) => ({
+    task_id: f.file_id,
+    filename: f.output_name || f.original_name,
+    size: f.size,
+    source: 'staging' as const,
+  }))
+})
+
+// PLIST 可选择的全部 SILK 文件（去重）
+const silkFiles = computed<PlistSelectableFile[]>(() => {
+  const merged = [...stagingSelectableSilkFiles.value, ...uploadSilkFiles.value]
+  const dedup = new Map<string, PlistSelectableFile>()
+  for (const f of merged) {
+    if (!dedup.has(f.task_id)) {
+      dedup.set(f.task_id, f)
+    }
+  }
+  return Array.from(dedup.values())
+})
+
 // 检查是否有正在转换的任务
 const isConverting = computed(() => {
   return Array.from(store.tasks.values()).some(
@@ -92,14 +194,96 @@ const isConverting = computed(() => {
   )
 })
 
+const isConvertDisabled = computed(() => {
+  if (isConverting.value) return true
+  if (settings.target_format === TargetFormat.PLIST) {
+    return silkFiles.value.length === 0
+  }
+  return !store.hasFiles
+})
+
+async function refreshStagingSilkFiles() {
+  try {
+    const response = await getStaging()
+    const files = response.data?.files || []
+    stagingSilkFiles.value = files.filter((f) => (f.output_name || '').toLowerCase().endsWith('.silk'))
+  } catch {
+    stagingSilkFiles.value = []
+  }
+}
+
+function selectAllSilkFiles() {
+  const allIds = silkFiles.value.map((f) => f.task_id)
+  checkedSilkIds.value = allIds
+}
+
+watch(() => settings.target_format, async (val) => {
+  if (val === TargetFormat.PLIST) {
+    await refreshStagingSilkFiles()
+  }
+})
+
+onMounted(async () => {
+  await refreshStagingSilkFiles()
+})
+
+// 格式化文件大小
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(2) + ' MB'
+}
+
 // 开始转换
 async function handleConvert() {
-  if (!store.hasFiles) {
+  if (settings.target_format !== TargetFormat.PLIST && !store.hasFiles) {
     ElMessage.warning('请先上传文件')
     return
   }
 
-  // 转换所有已上传的文件
+  // PLIST 模式：合并所有选中的 SILK 文件
+  if (settings.target_format === TargetFormat.PLIST) {
+    const validIds = new Set(silkFiles.value.map((f) => f.task_id))
+    const selectedIds = checkedSilkIds.value.filter((id) => validIds.has(id))
+
+    if (selectedIds.length === 0) {
+      ElMessage.warning('请选择要合并的 SILK 文件')
+      return
+    }
+
+    try {
+      store.converting = true
+      const response = await mergePlist({
+        task_ids: selectedIds,
+        output_filename: plistFilename.value
+      })
+
+      if (response.code === 0) {
+        ElMessage.success('PLIST 合并成功')
+        // 添加到任务列表
+        if (response.data) {
+          store.tasks.set(response.data.file_id, {
+            task_id: response.data.file_id,
+            status: TaskStatus.COMPLETED,
+            progress: 100,
+            download_url: response.data.download_url
+          })
+        }
+        // 清空选择
+        store.clearPlistSelection()
+        await refreshStagingSilkFiles()
+      } else {
+        ElMessage.error(response.message || 'PLIST 合并失败')
+      }
+    } catch (error) {
+      ElMessage.error('PLIST 合并失败')
+    } finally {
+      store.converting = false
+    }
+    return
+  }
+
+  // 普通转换模式
   const files = store.files.filter((f) => {
     const task = store.tasks.get(f.task_id)
     return task?.status === 'pending'
@@ -138,5 +322,63 @@ async function handleConvert() {
   font-size: 12px;
   color: var(--el-text-color-secondary);
   margin-top: 4px;
+}
+
+.plist-selection {
+  margin: 16px 0;
+  padding: 16px;
+  background-color: var(--el-fill-color-light);
+  border-radius: 4px;
+}
+
+.silk-file-list {
+  margin-top: 12px;
+}
+
+.no-silk-files {
+  padding: 20px;
+  text-align: center;
+}
+
+.selection-actions {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.silk-file-item {
+  margin-bottom: 12px;
+  padding: 8px;
+  background-color: var(--el-bg-color);
+  border-radius: 4px;
+  border: 1px solid var(--el-border-color);
+}
+
+.file-name {
+  font-weight: 500;
+}
+
+.file-size {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-left: 8px;
+}
+
+.file-source-tag {
+  margin-left: 8px;
+}
+
+.selection-toolbar {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--el-border-color);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.selection-count {
+  font-size: 14px;
+  color: var(--el-text-color-secondary);
+  margin-left: auto;
 }
 </style>

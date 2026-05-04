@@ -4,7 +4,7 @@ FastAPI 应用主入口
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import convert
+from app.api import convert, plist, staging, config
 from app.logger import logger
 
 # 创建 FastAPI 应用
@@ -17,7 +17,7 @@ app = FastAPI(
 # CORS 配置
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -26,12 +26,19 @@ app.add_middleware(
 
 # 注册路由
 app.include_router(convert.router)
+app.include_router(plist.router)
+app.include_router(staging.router)
+app.include_router(config.router)
 
 
 @app.on_event("startup")
 async def startup_event():
     """应用启动事件"""
     logger.info("🚀 Silk 音频转换器启动")
+    # 启动暂存区后台清理任务
+    from app.services.staging_service import StagingService
+    staging_svc = StagingService()
+    await staging_svc.start_cleanup_task()
 
 
 @app.on_event("shutdown")

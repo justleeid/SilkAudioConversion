@@ -72,6 +72,8 @@ async def download(task_id: str):
     from pathlib import Path
     from app.config import settings
     from app.models.response import ApiResponse, ErrorCode
+    from app.services.staging_service import StagingService
+    import urllib.parse
 
     # 查找输出文件
     output_dir = Path(settings.output_dir)
@@ -84,9 +86,24 @@ async def download(task_id: str):
         )
 
     file_path = files[0]
+    
+    # 从暂存区获取原始文件名
+    staging = StagingService()
+    staging_file = staging.get_file(task_id)
+    
+    if staging_file:
+        # 使用原始文件名去掉扩展名，加上目标格式后缀
+        import os
+        original_base = os.path.splitext(staging_file.original_name)[0]
+        target_ext = file_path.suffix
+        # 构建用户友好的文件名
+        download_filename = f"{original_base}_converted{target_ext}"
+    else:
+        # 降级方案：使用原始输出文件名
+        download_filename = file_path.name
 
     return FileResponse(
         path=file_path,
-        filename=file_path.name,
+        filename=download_filename,
         media_type='application/octet-stream'
     )
