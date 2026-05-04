@@ -13,6 +13,7 @@ from app.models.convert import TaskInfo, TaskStatus, ConvertRequest
 from app.models.response import ApiResponse, ErrorCode, ERROR_MESSAGES
 from app.services.audio_service import AudioService
 from app.services.file_service import FileService
+from app.services.staging_service import StagingService
 
 
 class ConvertService:
@@ -21,6 +22,7 @@ class ConvertService:
     def __init__(self):
         self.audio_service = AudioService()
         self.file_service = FileService()
+        self.staging_service = StagingService()
         self.temp_dir = Path(settings.temp_dir)
         self.output_dir = Path(settings.output_dir)
 
@@ -98,7 +100,7 @@ class ConvertService:
             task_info.status = TaskStatus.PROCESSING
             task_info.progress = 0
 
-            # 查找上载的文件
+            # 查找上传的文件
             upload_files = list(self.file_service.upload_dir.glob(f"{task_id}_*"))
             if not upload_files:
                 return ApiResponse(
@@ -213,6 +215,65 @@ class ConvertService:
                         logger.error(f"❌ 不支持的转换: MP3 → {request.target_format.value}")
                         return
 
+                elif input_format == '.m4a':
+                    # M4A 编码 → WAV/MP3/SILK
+                    if request.target_format.value == 'WAV':
+                        success = await self.audio_service.m4a_to_wav(
+                            input_file,
+                            output_path,
+                            request.sample_rate or 24000
+                        )
+                    elif request.target_format.value == 'MP3':
+                        success = await self.audio_service.m4a_to_mp3(
+                            input_file,
+                            output_path,
+                            request.sample_rate or 24000,
+                            request.bit_rate or 24000
+                        )
+                    elif request.target_format.value == 'SILK':
+                        success = await self.audio_service.m4a_to_silk(
+                            input_file,
+                            output_path,
+                            request.sample_rate or 24000,
+                            request.bit_rate or 24000,
+                            request.frame_size or 20,
+                            request.wechat_compatible
+                        )
+                    else:
+                        task_info.status = TaskStatus.FAILED
+                        task_info.error_message = f"不支持从 M4A 转换到 {request.target_format.value}"
+                        logger.error(f"❌ 不支持的转换: M4A → {request.target_format.value}")
+                        return
+
+                elif input_format == '.amr':
+                    # AMR 编码 → WAV/MP3/SILK
+                    if request.target_format.value == 'WAV':
+                        success = await self.audio_service.amr_to_wav(
+                            input_file,
+                            output_path,
+                            request.sample_rate or 24000
+                        )
+                    elif request.target_format.value == 'MP3':
+                        success = await self.audio_service.amr_to_mp3(
+                            input_file,
+                            output_path,
+                            request.sample_rate or 24000
+                        )
+                    elif request.target_format.value == 'SILK':
+                        success = await self.audio_service.amr_to_silk(
+                            input_file,
+                            output_path,
+                            request.sample_rate or 24000,
+                            request.bit_rate or 24000,
+                            request.frame_size or 20,
+                            request.wechat_compatible
+                        )
+                    else:
+                        task_info.status = TaskStatus.FAILED
+                        task_info.error_message = f"不支持从 AMR 转换到 {request.target_format.value}"
+                        logger.error(f"❌ 不支持的转换: AMR → {request.target_format.value}")
+                        return
+
                 else:
                     task_info.status = TaskStatus.FAILED
                     task_info.error_message = f"不支持的输入格式: {input_format}"
@@ -227,6 +288,14 @@ class ConvertService:
                     task_info.status = TaskStatus.COMPLETED
                     task_info.progress = 100
                     task_info.download_url = f"/api/download/{task_id}"
+
+                    # 添加到暂存区
+                    original_name = input_file.name.split('_', 1)[-1] if '_' in input_file.name else input_file.name
+                    await self.staging_service.add_file(
+                        file_id=task_id,
+                        original_name=original_name,
+                        output_path=output_path
+                    )
 
                     logger.info(f"✅ 转换成功: {task_id}")
 
