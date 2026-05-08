@@ -97,7 +97,7 @@ async def download(task_id: str):
         original_base = os.path.splitext(staging_file.original_name)[0]
         target_ext = file_path.suffix
         # 构建用户友好的文件名
-        download_filename = f"{original_base}_converted{target_ext}"
+        download_filename = f"{original_base}{target_ext}"
     else:
         # 降级方案：使用原始输出文件名
         download_filename = file_path.name

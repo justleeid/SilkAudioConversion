@@ -15,7 +15,7 @@
       >
         <div class="task-header">
           <div class="task-info">
-            <span class="task-id">{{ getFileById(task.task_id)?.filename || task.task_id }}</span>
+            <span class="task-id">{{ getTaskDisplayName(task) }}</span>
             <el-tag
               :type="getStatusTagType(task.status)"
               size="small"
@@ -39,7 +39,7 @@
         <el-progress
           v-if="task.status === TaskStatus.PROCESSING"
           :percentage="task.progress"
-          :status="task.status === TaskStatus.COMPLETED ? 'success' : undefined"
+          :status="(task.status as TaskStatus) === TaskStatus.COMPLETED ? 'success' : undefined"
         />
 
         <!-- 错误消息 -->
@@ -59,9 +59,12 @@
 import { computed } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { TaskStatus } from '@/types'
-import { download } from '@/api/convert'
+import type { StagingFile } from '@/types'
+import { download, getStaging } from '@/api/convert'
+import { ref, onMounted } from 'vue'
 
 const store = useAppStore()
+const stagingFiles = ref<StagingFile[]>([])
 
 // 所有任务
 const allTasks = computed(() => Array.from(store.tasks.values()))
@@ -70,6 +73,33 @@ const allTasks = computed(() => Array.from(store.tasks.values()))
 function getFileById(taskId: string) {
   return store.files.find((f) => f.task_id === taskId)
 }
+
+// 获取任务显示名称
+function getTaskDisplayName(task: any): string {
+  // 1. 优先 task.filename
+  if (task.filename) return task.filename
+  // 2. 查找上传文件
+  const file = getFileById(task.task_id)
+  if (file) return file.filename
+  // 3. 查找暂存区
+  const staging = stagingFiles.value.find((f) => f.file_id === task.task_id)
+  if (staging) return staging.output_name || staging.original_name
+  // 4. 降级显示 task_id 前8位
+  return task.task_id.substring(0, 8) + '...'
+}
+
+async function loadStagingFiles() {
+  try {
+    const response = await getStaging()
+    if (response.data) {
+      stagingFiles.value = response.data.files
+    }
+  } catch {}
+}
+
+onMounted(() => {
+  loadStagingFiles()
+})
 
 // 获取状态标签类型
 function getStatusTagType(status: TaskStatus): '' | 'success' | 'warning' | 'danger' | 'info' {
@@ -151,5 +181,17 @@ function handleDownload(task: any) {
 
 .el-alert {
   margin-top: 8px;
+}
+
+@media (max-width: 768px) {
+  .task-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .task-info {
+    flex-wrap: wrap;
+  }
 }
 </style>

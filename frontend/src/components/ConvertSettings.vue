@@ -27,6 +27,18 @@
           show-icon
         />
 
+        <!-- PLIST 输出文件名 -->
+        <el-form-item v-if="settings.target_format === TargetFormat.PLIST" label="输出文件名">
+          <el-input
+            v-model="plistFilename"
+            placeholder="请输入合并后的文件名"
+            class="plist-filename-input"
+          >
+            <template #append>.plist</template>
+          </el-input>
+          <div class="hint">合并后的 PLIST 文件名称，用于暂存区识别</div>
+        </el-form-item>
+
         <!-- PLIST 模式下的 SILK 文件选择 -->
         <div v-if="settings.target_format === TargetFormat.PLIST" class="plist-selection">
           <el-form-item label="选择 SILK 文件">
@@ -266,7 +278,8 @@ async function handleConvert() {
             task_id: response.data.file_id,
             status: TaskStatus.COMPLETED,
             progress: 100,
-            download_url: response.data.download_url
+            download_url: response.data.download_url,
+            filename: response.data.filename || plistFilename.value
           })
         }
         // 清空选择
@@ -283,14 +296,14 @@ async function handleConvert() {
     return
   }
 
-  // 普通转换模式
+  // 普通转换模式（允许重新转换已完成的文件）
   const files = store.files.filter((f) => {
     const task = store.tasks.get(f.task_id)
-    return task?.status === 'pending'
+    return task && task.status !== TaskStatus.PROCESSING
   })
 
   if (files.length === 0) {
-    ElMessage.warning('没有待转换的文件')
+    ElMessage.warning('没有可转换的文件')
     return
   }
 
@@ -380,5 +393,46 @@ async function handleConvert() {
   font-size: 14px;
   color: var(--el-text-color-secondary);
   margin-left: auto;
+}
+
+.plist-filename-input {
+  max-width: 320px;
+}
+
+@media (max-width: 768px) {
+  .convert-settings :deep(.el-form-item) {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .convert-settings :deep(.el-form-item__label) {
+    width: auto !important;
+    margin-bottom: 4px;
+  }
+
+  .convert-settings :deep(.el-select) {
+    width: 100% !important;
+  }
+
+  .convert-settings :deep(.el-form-item__content) {
+    width: 100%;
+    margin-left: 0 !important;
+  }
+
+  .selection-actions {
+    max-height: 200px;
+  }
+
+  .silk-file-item {
+    padding: 6px;
+  }
+
+  .selection-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .plist-filename-input {
+    max-width: 100%;
+  }
 }
 </style>

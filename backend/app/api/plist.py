@@ -33,11 +33,17 @@ async def merge_silk_to_plist(request: PlistMergeRequest):
     """合并多个 SILK 文件为一个 PLIST"""
     try:
         import uuid
+        import os
         upload_dir = Path(settings.upload_dir)
         output_dir = Path(settings.output_dir)
 
-        # 查找对应的 SILK 文件
+        # 提前导入暂存服务，用于解析原始文件名
+        from app.services.staging_service import StagingService
+        staging = StagingService()
+
+        # 查找对应的 SILK 文件，同时解析原始文件名作为 PLIST key
         silk_paths = []
+        key_names = []
         for task_id in request.task_ids:
             upload_matches = list(upload_dir.glob(f"{task_id}_*"))
             output_matches = list(output_dir.glob(f"{task_id}_output.*"))
@@ -59,13 +65,28 @@ async def merge_silk_to_plist(request: PlistMergeRequest):
 
             silk_paths.append(source_file)
 
+            # 解析原始文件名作为 PLIST 字典的 key
+            original_name = staging.resolve_original_name(task_id)
+            if original_name:
+                key_name = os.path.splitext(original_name)[0]
+            else:
+                # 尝试从上传目录匹配的文件名中提取
+                key_name = None
+                for f in upload_matches:
+                    if f.name.startswith(task_id + "_"):
+                        key_name = os.path.splitext(f.name[len(task_id) + 1:])[0]
+                        break
+                if not key_name:
+                    key_name = source_file.stem  # 回退：不含扩展名的输出文件名
+            key_names.append(key_name)
+
         # 生成文件 ID 和输出路径（使用标准命名以便下载端点查找）
         file_id = uuid.uuid4().hex
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / f"{file_id}_output.plist"
 
-        # 执行合并
-        success = plist_service.merge_silk_to_plist(silk_paths, output_path)
+        # 执行合并（传入原始文件名作为 key）
+        success = plist_service.merge_silk_to_plist(silk_paths, output_path, key_names)
 
         if not success:
             return ApiResponse(
@@ -74,8 +95,6 @@ async def merge_silk_to_plist(request: PlistMergeRequest):
             )
 
         # 添加到暂存区
-        from app.services.staging_service import StagingService
-        staging = StagingService()
         await staging.add_file(
             file_id=file_id,
             original_name=request.output_filename or "voices.plist",

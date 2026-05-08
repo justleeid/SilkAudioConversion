@@ -158,4 +158,25 @@ function formatFileSize(bytes: number): string {
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
+
+@media (max-width: 768px) {
+  .file-item {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .file-info {
+    flex: 1 1 100%;
+  }
+
+  .file-icon {
+    font-size: 24px;
+    margin-right: 8px;
+  }
+
+  .file-list-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
 </style>

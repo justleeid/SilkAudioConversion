@@ -96,6 +96,22 @@ export async function deleteStagingFile(fileId: string): Promise<ApiResponse<nul
 }
 
 /**
+ * 批量删除暂存文件
+ */
+export async function batchDeleteStagingFiles(fileIds: string[]): Promise<ApiResponse<{ deleted: number }>> {
+  const response = await client.post<ApiResponse<{ deleted: number }>>('/api/staging/batch-delete', { file_ids: fileIds })
+  return response.data
+}
+
+/**
+ * 重命名暂存文件
+ */
+export async function renameStagingFile(fileId: string, name: string): Promise<ApiResponse<{ file_id: string; name: string }>> {
+  const response = await client.post<ApiResponse<{ file_id: string; name: string }>>(`/api/staging/${fileId}/rename`, { name })
+  return response.data
+}
+
+/**
  * 清理过期暂存文件
  */
 export async function cleanupStaging(): Promise<ApiResponse<{ cleaned: number }>> {

@@ -63,6 +63,7 @@ export interface TaskInfo {
   estimated_time?: number
   error_message?: string
   download_url?: string
+  filename?: string
 }
 
 /**

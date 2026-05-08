@@ -58,7 +58,7 @@ import StagingPanel from '@/components/StagingPanel.vue'
 .header {
   background: linear-gradient(135deg, var(--el-color-primary) 0%, var(--el-color-primary-light-3) 100%);
   color: white;
-  padding: 40px 20px;
+  padding: 24px 20px;
   text-align: center;
 }
 
@@ -105,12 +105,16 @@ import StagingPanel from '@/components/StagingPanel.vue'
 
 /* 响应式设计 */
 @media (max-width: 768px) {
+  .header {
+    padding: 20px 16px;
+  }
+
   .title {
-    font-size: 28px;
+    font-size: 24px;
   }
 
   .subtitle {
-    font-size: 14px;
+    font-size: 13px;
   }
 
   .main-content {
@@ -120,6 +124,21 @@ import StagingPanel from '@/components/StagingPanel.vue'
   .upload-section,
   .settings-section {
     margin-bottom: 20px;
+  }
+}
+
+@media (max-width: 480px) {
+  .header {
+    padding: 14px 12px;
+  }
+
+  .title {
+    font-size: 20px;
+    margin-bottom: 4px;
+  }
+
+  .subtitle {
+    font-size: 12px;
   }
 }
 </style>

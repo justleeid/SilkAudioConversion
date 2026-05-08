@@ -51,3 +51,4 @@ class TaskInfo(BaseModel):
     estimated_time: Optional[int] = None
     error_message: Optional[str] = None
     download_url: Optional[str] = None
+    filename: Optional[str] = None
