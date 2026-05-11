@@ -73,7 +73,6 @@ async def download(task_id: str):
     from app.config import settings
     from app.models.response import ApiResponse, ErrorCode
     from app.services.staging_service import StagingService
-    import urllib.parse
 
     # 查找输出文件
     output_dir = Path(settings.output_dir)

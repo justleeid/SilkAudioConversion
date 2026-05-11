@@ -97,7 +97,7 @@ class FileService:
                     error_message=f"文件内容与扩展名不匹配"
                 )
 
-            logger.info(f"✅ 文件验证通过: {file.filename}")
+            logger.info(f"文件验证通过: {file.filename}")
             return FileValidationResult(is_valid=True)
 
         except Exception as e:
@@ -135,7 +135,7 @@ class FileService:
             # 获取文件格式
             file_ext = Path(file.filename).suffix.lower().replace('.', '')
 
-            logger.info(f"✅ 文件保存成功: {file_path}")
+            logger.info(f"文件保存成功: {file_path}")
 
             return FileInfo(
                 task_id=task_id,
@@ -178,5 +178,5 @@ class FileService:
             file_info = await self.save_upload(file)
             validated_files.append(file_info)
 
-        logger.info(f"✅ 成功上传 {len(validated_files)}/{len(files)} 个文件")
+        logger.info(f"成功上传 {len(validated_files)}/{len(files)} 个文件")
         return validated_files

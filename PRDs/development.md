@@ -1,8 +1,8 @@
 # Silk 音频格式转换 Web 应用 - 技术规范文档
 
-**版本**: v1.1  
+**版本**: v1.2  
 **创建日期**: 2026-03-19  
-**最后更新**: 2026-03-19  
+**最后更新**: 2026-05-09  
 **状态**: ✅ 可用于开发指导
 
 ---
@@ -28,11 +28,12 @@
 |------|----------|------|------|
 | 框架 | Vue 3 | 3.4.x | 成熟稳定，Composition API |
 | 构建工具 | Vite | 5.x | 快速开发，热更新 |
-| UI 组件库 | Element Plus | 2.4.x | 成熟中文组件库，移动端支持 |
+| UI 组件库 | Naive UI | 2.x | Tree-shaking 按需引入，TypeScript 原生支持，内置暗色模式，视觉风格现代克制 |
 | 语言 | TypeScript | 5.x | 类型安全，减少运行时错误 |
 | 状态管理 | Pinia | 2.x | Vue 3 官方推荐，轻量 |
+| 样式方案 | Tailwind CSS | 3.x | 原子化 CSS，与 Naive UI 互补处理自定义布局与间距 |
 | HTTP 客户端 | Axios | 1.x | 成熟稳定，拦截器支持 |
-| 文件上传 | Element Plus Upload | 2.4.x | 与 UI 组件库一致，支持拖拽与自定义上传流程 |
+| 文件上传 | Naive UI Upload | 2.x | 与 UI 组件库一致，支持拖拽与自定义上传流程 |
 | 代码规范 | ESLint + Prettier | 最新 | 统一代码风格 |
 
 ### 2.2 后端技术栈
@@ -99,7 +100,7 @@ silk_encode/
 ├── PRDs/                      # 产品与设计文档
 │   ├── PRD.md
 │   ├── development.md
-│   └── ui.md
+│   └── Silk 音频转换器 - UI 设计规范.md
 └── README.md
 ```
 
@@ -118,15 +119,19 @@ git submodule add https://github.com/tafayor/silk-codec tools/silk-v3-encoder
 
 #### 4.1.1 文件结构
 
-```typescript
-// 组件文件结构 (src/components/MyComponent.vue)
+```vue
+<!-- 组件文件结构 (src/components/MyComponent.vue) -->
 <template>
-  <!-- 模板内容 -->
+  <!-- 布局使用 Tailwind 原子类，组件使用 Naive UI -->
+  <div class="flex items-center gap-3 p-4 rounded-lg bg-white dark:bg-gray-800">
+    <n-button type="primary" @click="handleClick">操作</n-button>
+  </div>
 </template>
 
 <script setup lang="ts">
-// 导入
+// 导入 — Naive UI 组件按需引入，自动 tree-shaking
 import { ref } from 'vue'
+import { NButton } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
 
 // 类型定义
@@ -149,9 +154,14 @@ const handleClick = () => {
 </script>
 
 <style scoped>
-/* 样式 */
+/* 仅在 Tailwind 无法覆盖的细节处使用 scoped CSS（如动画、滚动条等） */
 </style>
 ```
+
+**样式分工原则：**
+- **Tailwind CSS**：布局（flex/grid）、间距（p-/m-/gap-）、颜色（text-/bg-）、响应式断点
+- **Naive UI**：表单、表格、弹窗、通知、标签等交互组件
+- **`<style scoped>`**：仅用于 Tailwind 无法覆盖的自定义动画、滚动条、第三方覆写等少数场景
 
 #### 4.1.2 API 调用规范
 
@@ -621,6 +631,15 @@ TASK_TIMEOUT=3600
 # 暂存区配置
 CACHE_EXPIRE_HOURS=48
 CACHE_CLEANUP_INTERVAL=3600
+
+# 数据库配置
+DB_AUDIO_HOST=localhost
+DB_AUDIO_PORT=3306
+DB_AUDIO_USER=root
+DB_AUDIO_PASSWORD=
+DB_AUDIO_NAME=ai_agent
+DB_AUDIO_TABLE=ai_agent_chat_audio
+DB_HISTORY_TABLE=ai_agent_chat_history
 ```
 
 ### 7.2 Python 配置类
@@ -657,11 +676,182 @@ class Settings(BaseSettings):
     cache_expire_hours: int = 48
     cache_cleanup_interval: int = 3600
     
+    # 数据库配置
+    db_audio_host: str = "localhost"
+    db_audio_port: int = 3306
+    db_audio_user: str = "root"
+    db_audio_password: str = ""
+    db_audio_name: str = "ai_agent"
+    db_audio_table: str = "ai_agent_chat_audio"
+    db_history_table: str = "ai_agent_chat_history"
+    
     class Config:
         env_file = ".env"
         case_sensitive = False
 
 settings = Settings()
+```
+
+---
+
+## 7.3 数据库音频导入服务
+
+### 7.3.1 数据库连接与查询
+
+```python
+# app/services/database_audio_service.py
+from typing import Optional
+import mysql.connector
+from loguru import logger
+from app.config import settings
+
+class DatabaseAudioService:
+    """数据库音频查询导入服务"""
+    
+    def __init__(self):
+        self.host = settings.db_audio_host
+        self.port = settings.db_audio_port
+        self.user = settings.db_audio_user
+        self.password = settings.db_audio_password
+        self.database = settings.db_audio_name
+    
+    def get_connection(self):
+        """获取数据库连接"""
+        conn = mysql.connector.connect(
+            host=self.host,
+            port=self.port,
+            user=self.user,
+            password=self.password,
+            database=self.database
+        )
+        return conn
+    
+    async def query_audio_records(
+        self,
+        date_start: str,
+        date_end: str,
+        keyword: Optional[str] = None,
+        page: int = 1,
+        per_page: int = 20
+    ) -> dict:
+        """查询数据库中的音频记录 (chat_type=2, WAV 格式已验证)"""
+        conn = self.get_connection()
+        cursor = conn.cursor(dictionary=True)
+        
+        # 构建查询 SQL
+        query = f"""
+            SELECT 
+                a.id as audio_id,
+                SUBSTRING(h.content, 1, 50) as title,
+                DATE_FORMAT(h.created_at, '%Y-%m-%d %H:%i:%s') AS created_at,
+                LENGTH(a.audio) as size
+            FROM {settings.db_history_table} h
+            JOIN {settings.db_audio_table} a ON h.audio_id = a.id
+            WHERE h.created_at >= %s AND h.created_at <= %s
+            AND h.chat_type = 2
+        """
+        
+        params = [f"{date_start} 00:00:00", f"{date_end} 23:59:59"]
+        
+        if keyword:
+            query += " AND h.content LIKE %s"
+            params.append(f"%{keyword}%")
+        
+        # 分页
+        offset = (page - 1) * per_page
+        query += " ORDER BY h.created_at DESC LIMIT %s OFFSET %s"
+        params.extend([per_page, offset])
+        
+        cursor.execute(query, params)
+        records = cursor.fetchall()
+        
+        logger.info(f"查询数据库音频: {len(records)} 条")
+        
+        cursor.close()
+        conn.close()
+        
+        return {"records": records}
+    
+    async def get_audio_blob(self, audio_id: str) -> bytes:
+        """获取音频 blob 数据"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(
+            f"SELECT audio FROM {settings.db_audio_table} WHERE id = %s",
+            (audio_id,)
+        )
+        result = cursor.fetchone()
+        
+        cursor.close()
+        conn.close()
+        
+        if not result:
+            raise ValueError(f"音频 {audio_id} 不存在")
+        
+        return result[0]
+```
+
+### 7.3.2 数据库音频导入 API 端点
+
+```python
+# app/api/db_audio.py
+from fastapi import APIRouter, Query
+from typing import Optional
+from pydantic import BaseModel
+from app.services.database_audio_service import DatabaseAudioService
+from app.models.response import ApiResponse
+from loguru import logger
+
+router = APIRouter(prefix="/api/db-audio", tags=["database_audio"])
+
+class ImportRequest(BaseModel):
+    audio_ids: list[str]
+
+@router.get("/query")
+async def query_database_audio(
+    date_start: str = Query(...),
+    date_end: str = Query(...),
+    keyword: Optional[str] = Query(None),
+    page: int = Query(1),
+    per_page: int = Query(20)
+):
+    """查询数据库音频记录"""
+    try:
+        service = DatabaseAudioService()
+        result = await service.query_audio_records(date_start, date_end, keyword, page, per_page)
+        return ApiResponse(code=0, message="查询成功", data=result)
+    except Exception as e:
+        logger.error(f"查询失败: {str(e)}")
+        return ApiResponse(code=400, message=str(e))
+
+@router.post("/import")
+async def import_database_audio(request: ImportRequest):
+    """导入数据库音频"""
+    try:
+        if not request.audio_ids:
+            return ApiResponse(code=400, message="没有选择任何音频")
+        
+        db_service = DatabaseAudioService()
+        
+        tasks = []
+        for audio_id in request.audio_ids:
+            try:
+                audio_blob = await db_service.get_audio_blob(audio_id)
+                # 保存临时文件并创建转换任务
+                # 实现细节由 ConvertService 处理
+                tasks.append({"task_id": audio_id, "source": "database"})
+            except Exception as e:
+                logger.error(f"处理 {audio_id} 失败: {str(e)}")
+        
+        return ApiResponse(code=0, message="导入成功", data={"imported_count": len(tasks)})
+    except Exception as e:
+        logger.error(f"导入失败: {str(e)}")
+        return ApiResponse(code=500, message=str(e))
+
+# app/main.py 中注册路由:
+# from app.api import db_audio
+# app.include_router(db_audio.router)
 ```
 
 ---
@@ -848,13 +1038,24 @@ pydantic-settings==2.1.0
 python-jose==3.3.0
 ```
 
+```
+# frontend/package.json (核心依赖)
+vue: 3.4.x
+naive-ui: 2.x
+tailwindcss: 3.x
+pinia: 2.x
+axios: 1.x
+typescript: 5.x
+```
+
 ### 12.2 参考文档
 
 | 文档 | 链接 |
 |------|------|
 | FastAPI 官方文档 | https://fastapi.tiangolo.com/ |
 | Vue 3 官方文档 | https://vuejs.org/ |
-| Element Plus 文档 | https://element-plus.org/ |
+| Naive UI 文档 | https://www.naiveui.com/ |
+| Tailwind CSS 文档 | https://tailwindcss.com/ |
 | silk-v3-decoder | https://github.com/kn007/silk-v3-decoder |
 | ffmpeg 文档 | https://ffmpeg.org/documentation.html |
 
@@ -868,16 +1069,16 @@ python-jose==3.3.0
    - 定义技术栈、目录结构、API 风格、配置方式、安全规范、部署口径
 2. **PRD.md**：产品需求文档
    - 定义需求边界与业务验收标准
-3. **ui.md**：UI 设计规范
+3. **Silk 音频转换器 - UI 设计规范.md**：UI 设计规范
    - 定义视觉交互与组件表现
 
 **任何功能、接口、配置、部署、安全实现，必须先满足本技术规范。**
 
 ### 13.2 跨文档同步规则
 
-1. 当接口结构、字段命名、状态枚举变化时：先更新 development.md，再同步 PRD.md 与 ui.md
-2. 当新增业务能力时：先更新 PRD.md，再补充 development.md，最后更新 ui.md
-3. 当仅视觉风格变化时：更新 ui.md，同时检查 PRD.md 与 development.md 引用是否失效
+1. 当接口结构、字段命名、状态枚举变化时：先更新 development.md，再同步 PRD.md 与 Silk 音频转换器 - UI 设计规范.md
+2. 当新增业务能力时：先更新 PRD.md，再补充 development.md，最后更新 Silk 音频转换器 - UI 设计规范.md
+3. 当仅视觉风格变化时：更新 Silk 音频转换器 - UI 设计规范.md，同时检查 PRD.md 与 development.md 引用是否失效
 
 ### 13.3 联动验收清单
 

@@ -1,7 +1,3 @@
-/**
- * 应用状态管理
- * 参考 development.md 第 2.1 节（Pinia）
- */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { FileInfo, TaskInfo, ConvertParams } from '@/types'
@@ -9,36 +5,30 @@ import { upload, convert, queryStatus } from '@/api/convert'
 import { TaskStatus } from '@/types'
 
 export const useAppStore = defineStore('app', () => {
-  // 状态
   const files = ref<FileInfo[]>([])
   const tasks = ref<Map<string, TaskInfo>>(new Map())
   const uploading = ref(false)
   const converting = ref(false)
-  const selectedForPlist = ref<Set<string>>(new Set())  // PLIST 模式下选中的文件 ID
+  const selectedForPlist = ref<Set<string>>(new Set())
 
-  // 计算属性
   const hasFiles = computed(() => files.value.length > 0)
+
   const completedTasks = computed(() =>
     Array.from(tasks.value.values()).filter((t) => t.status === TaskStatus.COMPLETED)
   )
+
   const activeTasks = computed(() =>
     Array.from(tasks.value.values()).filter(
       (t) => t.status === TaskStatus.PENDING || t.status === TaskStatus.PROCESSING
     )
   )
 
-  // Actions
-  /**
-   * 上传文件
-   */
   async function uploadFiles(fileList: File[]) {
+    uploading.value = true
     try {
-      uploading.value = true
       const response = await upload(fileList)
-
       if (response.data) {
         files.value.push(...response.data.files)
-        // 初始化任务状态
         response.data.files.forEach((file) => {
           tasks.value.set(file.task_id, {
             task_id: file.task_id,
@@ -47,86 +37,56 @@ export const useAppStore = defineStore('app', () => {
           })
         })
       }
-
       return true
-    } catch (error) {
-      console.error('上传失败:', error)
+    } catch {
       return false
     } finally {
       uploading.value = false
     }
   }
 
-  /**
-   * 开始转换
-   */
   async function startConversion(taskId: string, params: ConvertParams) {
     try {
       converting.value = true
       const response = await convert(taskId, params)
-
       if (response.data) {
-        // 更新任务状态
         const task = tasks.value.get(taskId)
-        if (task) {
-          task.status = TaskStatus.PROCESSING
-        }
-
-        // 开始轮询状态
+        if (task) task.status = TaskStatus.PROCESSING
         pollTaskStatus(taskId)
       }
-
       return true
-    } catch (error) {
-      console.error('转换失败:', error)
+    } catch {
       return false
     } finally {
       converting.value = false
     }
   }
 
-  /**
-   * 轮询任务状态
-   */
   async function pollTaskStatus(taskId: string) {
     const poll = async () => {
       try {
         const response = await queryStatus(taskId)
-
         if (response.data) {
           tasks.value.set(taskId, response.data)
-
-          // 如果任务仍在进行，继续轮询
-          if (
-            response.data.status === TaskStatus.PENDING ||
-            response.data.status === TaskStatus.PROCESSING
-          ) {
+          const status = response.data.status
+          if (status === TaskStatus.PENDING || status === TaskStatus.PROCESSING) {
             setTimeout(poll, 1000)
           }
         }
-      } catch (error) {
-        console.error('查询状态失败:', error)
+      } catch {
+        // continue polling on transient errors
       }
     }
-
     await poll()
   }
 
-  /**
-   * 移除文件
-   */
   function removeFile(taskId: string) {
-    const index = files.value.findIndex((f) => f.task_id === taskId)
-    if (index > -1) {
-      files.value.splice(index, 1)
-    }
+    const idx = files.value.findIndex((f) => f.task_id === taskId)
+    if (idx > -1) files.value.splice(idx, 1)
     tasks.value.delete(taskId)
     selectedForPlist.value.delete(taskId)
   }
 
-  /**
-   * 批量移除文件
-   */
   function removeFiles(taskIds: string[]) {
     const idSet = new Set(taskIds)
     files.value = files.value.filter((f) => !idSet.has(f.task_id))
@@ -136,22 +96,14 @@ export const useAppStore = defineStore('app', () => {
     })
   }
 
-  /**
-   * 清除已完成的任务
-   */
   function clearCompletedTasks() {
     completedTasks.value.forEach((task) => {
       tasks.value.delete(task.task_id)
-      const index = files.value.findIndex((f) => f.task_id === task.task_id)
-      if (index > -1) {
-        files.value.splice(index, 1)
-      }
+      const idx = files.value.findIndex((f) => f.task_id === task.task_id)
+      if (idx > -1) files.value.splice(idx, 1)
     })
   }
 
-  /**
-   * 重置状态
-   */
   function reset() {
     files.value = []
     tasks.value.clear()
@@ -160,9 +112,6 @@ export const useAppStore = defineStore('app', () => {
     selectedForPlist.value.clear()
   }
 
-  /**
-   * 切换 PLIST 文件选择
-   */
   function togglePlistSelection(taskId: string) {
     if (selectedForPlist.value.has(taskId)) {
       selectedForPlist.value.delete(taskId)
@@ -171,41 +120,25 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  /**
-   * 全选 SILK 文件
-   */
   function selectAllSilkForPlist() {
     const silkFiles = files.value.filter((f) => f.format.toLowerCase() === 'silk')
     silkFiles.forEach((f) => selectedForPlist.value.add(f.task_id))
   }
 
-  /**
-   * 清除 PLIST 文件选择
-   */
   function clearPlistSelection() {
     selectedForPlist.value.clear()
   }
 
+  // Staging version counter for cross-panel reactivity
+  const stagingVersion = ref(0)
+  function triggerStagingRefresh() { stagingVersion.value++ }
+
   return {
-    // 状态
-    files,
-    tasks,
-    uploading,
-    converting,
-    selectedForPlist,
-    // 计算属性
-    hasFiles,
-    completedTasks,
-    activeTasks,
-    // Actions
-    uploadFiles,
-    startConversion,
-    removeFile,
-    removeFiles,
-    clearCompletedTasks,
-    reset,
-    togglePlistSelection,
-    selectAllSilkForPlist,
-    clearPlistSelection
+    files, tasks, uploading, converting, selectedForPlist, stagingVersion,
+    hasFiles, completedTasks, activeTasks,
+    uploadFiles, startConversion, removeFile, removeFiles,
+    clearCompletedTasks, reset,
+    togglePlistSelection, selectAllSilkForPlist, clearPlistSelection,
+    triggerStagingRefresh
   }
 })

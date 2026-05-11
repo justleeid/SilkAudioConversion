@@ -69,17 +69,6 @@ export async function mergePlist(params: {
 }
 
 /**
- * 从 PLIST 提取 SILK
- */
-export async function extractPlist(fileId: string): Promise<ApiResponse<{ count: number; output_dir: string; files: string[] }>> {
-  const response = await client.post<ApiResponse<{ count: number; output_dir: string; files: string[] }>>(
-    '/api/plist/extract',
-    { plist_file_id: fileId }
-  )
-  return response.data
-}
-
-/**
  * 查询暂存区
  */
 export async function getStaging(): Promise<ApiResponse<{ files: import('@/types').StagingFile[]; stats: import('@/types').StagingStats }>> {
@@ -120,9 +109,17 @@ export async function cleanupStaging(): Promise<ApiResponse<{ cleaned: number }>
 }
 
 /**
- * 获取应用配置
+ * 查询数据库音频记录
  */
-export async function getConfig(): Promise<ApiResponse<import('@/types').AppConfig>> {
-  const response = await client.get<ApiResponse<import('@/types').AppConfig>>('/api/config')
+export async function queryDbAudio(params: import('@/types').DbAudioQueryParams): Promise<ApiResponse<import('@/types').DbAudioQueryResult>> {
+  const response = await client.get<ApiResponse<import('@/types').DbAudioQueryResult>>('/api/db-audio/query', { params })
+  return response.data
+}
+
+/**
+ * 导入数据库音频到转换队列
+ */
+export async function importDbAudio(audioIds: string[]): Promise<ApiResponse<import('@/types').DbAudioImportResult>> {
+  const response = await client.post<ApiResponse<import('@/types').DbAudioImportResult>>('/api/db-audio/import', { audio_ids: audioIds })
   return response.data
 }

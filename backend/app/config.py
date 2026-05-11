@@ -33,6 +33,16 @@ class Settings(BaseSettings):
     cache_expire_hours: int = 48
     cache_cleanup_interval: int = 3600
 
+    # 数据库配置（音频导入）
+    db_audio_host: str = "172.16.8.52"
+    db_audio_port: int = 3306
+    db_audio_user: str = "lan"
+    db_audio_password: str = ""
+    db_audio_name: str = "xiaozhi"
+    db_audio_charset: str = "utf8mb4"
+    db_audio_table: str = "ai_agent_chat_audio"
+    db_history_table: str = "ai_agent_chat_history"
+
     class Config:
         # 使用绝对路径指向 .env 文件
         import os

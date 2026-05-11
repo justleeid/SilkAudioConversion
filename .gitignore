@@ -64,8 +64,11 @@ cache/
 *.wav
 *.mp3
 *.silk
+*.m4a
 *.amr
 *.plist
+output/
+backend/output/
 
 # Keep sample test assets if needed
 !tests/fixtures/**

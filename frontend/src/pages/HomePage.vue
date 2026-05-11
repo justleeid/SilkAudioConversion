@@ -11,9 +11,16 @@
     <!-- Main Content -->
     <main class="main-content">
       <div class="container">
-        <!-- 上传区域 -->
+        <!-- 上传区域 - 支持本地上传和数据库导入 -->
         <section class="upload-section">
-          <UploadArea />
+          <el-tabs v-model="uploadMode" type="border-card" class="upload-tabs">
+            <el-tab-pane label="本地上传" name="local">
+              <UploadArea />
+            </el-tab-pane>
+            <el-tab-pane label="数据库导入" name="database">
+              <DbAudioImport />
+            </el-tab-pane>
+          </el-tabs>
         </section>
 
         <!-- 设置和文件列表 -->
@@ -42,10 +49,14 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import UploadArea from '@/components/UploadArea.vue'
+import DbAudioImport from '@/components/DbAudioImport.vue'
 import ConvertSettings from '@/components/ConvertSettings.vue'
 import TaskList from '@/components/TaskList.vue'
 import StagingPanel from '@/components/StagingPanel.vue'
+
+const uploadMode = ref('local')
 </script>
 
 <style scoped>
@@ -90,6 +101,10 @@ import StagingPanel from '@/components/StagingPanel.vue'
 
 .upload-section {
   margin-bottom: 40px;
+}
+
+.upload-tabs :deep(.el-tabs__content) {
+  padding: 0;
 }
 
 .settings-section {

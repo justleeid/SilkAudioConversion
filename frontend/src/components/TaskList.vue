@@ -56,12 +56,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { TaskStatus } from '@/types'
 import type { StagingFile } from '@/types'
 import { download, getStaging } from '@/api/convert'
-import { ref, onMounted } from 'vue'
 
 const store = useAppStore()
 const stagingFiles = ref<StagingFile[]>([])

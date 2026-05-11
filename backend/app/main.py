@@ -4,7 +4,7 @@ FastAPI 应用主入口
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import convert, plist, staging, config
+from app.api import convert, plist, staging, config, db_audio
 from app.logger import logger
 
 # 创建 FastAPI 应用
@@ -29,12 +29,13 @@ app.include_router(convert.router)
 app.include_router(plist.router)
 app.include_router(staging.router)
 app.include_router(config.router)
+app.include_router(db_audio.router)
 
 
 @app.on_event("startup")
 async def startup_event():
     """应用启动事件"""
-    logger.info("🚀 Silk 音频转换器启动")
+    logger.info("Silk 音频转换器启动")
     # 启动暂存区后台清理任务
     from app.services.staging_service import StagingService
     staging_svc = StagingService()
@@ -44,7 +45,7 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """应用关闭事件"""
-    logger.info("👋 Silk 音频转换器关闭")
+    logger.info("Silk 音频转换器关闭")
 
 
 @app.get("/")

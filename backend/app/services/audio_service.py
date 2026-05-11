@@ -5,7 +5,6 @@
 import subprocess
 import asyncio
 from pathlib import Path
-from typing import Optional
 from app.config import settings
 from app.logger import logger
 from app.utils.file_header import FileHeaderChecker
@@ -19,6 +18,7 @@ class AudioService:
         self.encoder_path = Path(settings.silk_encoder_bin)
         self.temp_dir = Path(settings.temp_dir)
         self.output_dir = Path(settings.output_dir)
+        self.last_error: str = ""
 
         # 确保目录存在
         self.temp_dir.mkdir(parents=True, exist_ok=True)
@@ -42,14 +42,18 @@ class AudioService:
             是否成功
         """
         try:
+            # 从文件名提取 task_id 作为短标识，避免解码器路径缓冲区溢出
+            name = silk_path.stem
+            short_id = name.split('_', 1)[0] if '_' in name else name
+
             logger.info(f"开始 SILK 解码: {silk_path}")
 
             # 1. 标准化 SILK 文件（移除微信头）
-            normalized_silk = self.temp_dir / f"normalized_{silk_path.name}"
+            normalized_silk = self.temp_dir / f"n_{short_id}.silk"
             FileHeaderChecker.normalize_silk(silk_path, normalized_silk)
 
             # 2. SILK 转 PCM
-            pcm_path = self.temp_dir / f"{silk_path.stem}.pcm"
+            pcm_path = self.temp_dir / f"{short_id}.pcm"
             cmd_decode = [
                 str(self.decoder_path),
                 str(normalized_silk),
@@ -65,7 +69,10 @@ class AudioService:
             stdout, stderr = await process.communicate()
 
             if process.returncode != 0:
-                logger.error(f"SILK 解码失败: {stderr.decode()}")
+                err_stderr = stderr.decode().strip()
+                err_stdout = stdout.decode().strip()
+                self.last_error = err_stderr or err_stdout or f"exit_code={process.returncode}"
+                logger.error(f"SILK 解码失败: {stderr.decode()}: {self.last_error}")
                 return False
 
             logger.info(f"SILK 转 PCM 成功: {pcm_path}")
@@ -89,10 +96,13 @@ class AudioService:
             stdout, stderr = await process.communicate()
 
             if process.returncode != 0:
-                logger.error(f"PCM 转 WAV 失败: {stderr.decode()}")
+                err_stderr = stderr.decode().strip()
+                err_stdout = stdout.decode().strip()
+                self.last_error = err_stderr or err_stdout or f"exit_code={process.returncode}"
+                logger.error(f"PCM 转 WAV 失败: {stderr.decode()}: {self.last_error}")
                 return False
 
-            logger.info(f"✅ SILK 转 WAV 成功: {output_path}")
+            logger.info(f"SILK 转 WAV 成功: {output_path}")
 
             # 4. 清理临时文件
             normalized_silk.unlink(missing_ok=True)
@@ -101,7 +111,8 @@ class AudioService:
             return True
 
         except Exception as e:
-            logger.error(f"❌ SILK 转 WAV 失败: {str(e)}")
+            self.last_error = str(e)
+            logger.error(f"SILK 转 WAV 失败: {str(e)}")
             return False
 
     async def silk_to_mp3(
@@ -151,10 +162,13 @@ class AudioService:
             stdout, stderr = await process.communicate()
 
             if process.returncode != 0:
-                logger.error(f"WAV 转 MP3 失败: {stderr.decode()}")
+                err_stderr = stderr.decode().strip()
+                err_stdout = stdout.decode().strip()
+                self.last_error = err_stderr or err_stdout or f"exit_code={process.returncode}"
+                logger.error(f"WAV 转 MP3 失败: {stderr.decode()}: {self.last_error}")
                 return False
 
-            logger.info(f"✅ SILK 转 MP3 成功: {output_path}")
+            logger.info(f"SILK 转 MP3 成功: {output_path}")
 
             # 3. 清理临时文件
             wav_path.unlink(missing_ok=True)
@@ -162,7 +176,8 @@ class AudioService:
             return True
 
         except Exception as e:
-            logger.error(f"❌ SILK 转 MP3 失败: {str(e)}")
+            self.last_error = str(e)
+            logger.error(f"SILK 转 MP3 失败: {str(e)}")
             return False
 
     async def wav_to_silk(
@@ -178,7 +193,7 @@ class AudioService:
         WAV 编码为 SILK
 
         Args:
-            wav_path: WAV ���件路径
+            wav_path: WAV 文件路径
             output_path: 输出 SILK 文件路径
             sample_rate: 采样率
             bit_rate: 比特率
@@ -189,10 +204,18 @@ class AudioService:
             是否成功
         """
         try:
-            logger.info(f"开始 WAV 编码为 SILK: {wav_path}")
+            # 从文件名提取 task_id 作为短标识，避免编码器的路径缓冲区溢出（~256 字节限制）
+            name = wav_path.stem
+            short_id = name.split('_', 1)[0] if '_' in name else name
+
+            logger.info(
+                f"开始 WAV 编码为 SILK: src={wav_path.name} "
+                f"sample_rate={sample_rate} bit_rate={bit_rate} frame_size={frame_size} "
+                f"wechat={wechat_compatible}"
+            )
 
             # 1. WAV 转 PCM（使用 ffmpeg）
-            pcm_path = self.temp_dir / f"{wav_path.stem}.pcm"
+            pcm_path = self.temp_dir / f"{short_id}.pcm"
             cmd_ffmpeg = [
                 'ffmpeg', '-y',
                 '-i', str(wav_path),
@@ -211,13 +234,26 @@ class AudioService:
             stdout, stderr = await process.communicate()
 
             if process.returncode != 0:
-                logger.error(f"WAV 转 PCM 失败: {stderr.decode()}")
+                err_stderr = stderr.decode().strip()
+                err_stdout = stdout.decode().strip()
+                self.last_error = err_stderr or err_stdout or f"exit_code={process.returncode}"
+                logger.error(
+                    f"WAV 转 PCM 失败: wav={wav_path} pcm={pcm_path} "
+                    f"stderr={err_stderr} stdout={err_stdout}"
+                )
                 return False
 
-            logger.info(f"WAV 转 PCM 成功: {pcm_path}")
+            logger.info(f"WAV 转 PCM 成功: {pcm_path} ({pcm_path.stat().st_size} bytes)")
 
-            # 2. PCM 编码为 SILK
-            temp_silk = self.temp_dir / f"{wav_path.stem}_temp.silk"
+            # 验证 PCM 文件
+            pcm_size = pcm_path.stat().st_size
+            if pcm_size < 100:
+                self.last_error = f"PCM 文件过小 ({pcm_size} bytes)，源音频可能无效"
+                logger.error(self.last_error)
+                return False
+
+            # 2. PCM 编码为 SILK（使用短路径避免编码器 ~256 字节缓冲区溢出）
+            temp_silk = self.temp_dir / f"{short_id}_temp.silk"
             cmd_encode = [
                 str(self.encoder_path),
                 str(pcm_path),
@@ -231,7 +267,7 @@ class AudioService:
             if wechat_compatible:
                 cmd_encode.append('-tencent')
 
-            logger.debug(f"执行编码命令: {' '.join(cmd_encode)}")
+            logger.info(f"执行编码命令: {' '.join(cmd_encode)}")
             process = await asyncio.create_subprocess_exec(
                 *cmd_encode,
                 stdout=asyncio.subprocess.PIPE,
@@ -240,19 +276,26 @@ class AudioService:
             stdout, stderr = await process.communicate()
 
             if process.returncode != 0:
-                logger.error(f"PCM 编码为 SILK 失败: {stderr.decode()}")
+                err_stderr = stderr.decode().strip()
+                err_stdout = stdout.decode().strip()
+                self.last_error = err_stderr or err_stdout or f"exit_code={process.returncode}"
+                logger.error(
+                    f"PCM 编码为 SILK 失败: pcm={pcm_path} ({pcm_size} bytes) "
+                    f"cmd={' '.join(cmd_encode)} "
+                    f"stderr={err_stderr} stdout={err_stdout} exit_code={process.returncode}"
+                )
                 return False
 
-            logger.info(f"PCM 编码为 SILK ���功: {temp_silk}")
+            logger.info(f"PCM 编码为 SILK 成功: {temp_silk}")
 
             # 3. 根据需求处理文件
             import shutil
             if wechat_compatible:
                 # 微信兼容格式：encoder 已经添加了 0x02 头，直接移动
                 shutil.move(str(temp_silk), str(output_path))
-                logger.info(f"✅ WAV 转 SILK 成功（微信格式）: {output_path}")
+                logger.info(f"WAV 转 SILK 成功（微信格式）: {output_path}")
             else:
-                # 标准格式：移除��能存在的微信头
+                # 标准格式：移除可能存在的微信头
                 with open(temp_silk, 'rb') as f:
                     data = f.read()
 
@@ -264,7 +307,7 @@ class AudioService:
                     f.write(data)
 
                 temp_silk.unlink(missing_ok=True)
-                logger.info(f"✅ WAV 转 SILK 成功（标准格式）: {output_path}")
+                logger.info(f"WAV 转 SILK 成功（标准格式）: {output_path}")
 
             # 4. 清理临时文件
             pcm_path.unlink(missing_ok=True)
@@ -272,7 +315,8 @@ class AudioService:
             return True
 
         except Exception as e:
-            logger.error(f"❌ WAV 转 SILK 失败: {str(e)}")
+            self.last_error = str(e)
+            logger.error(f"WAV 转 SILK 失败: {str(e)}")
             return False
 
     async def mp3_to_silk(
@@ -318,7 +362,10 @@ class AudioService:
             stdout, stderr = await process.communicate()
 
             if process.returncode != 0:
-                logger.error(f"MP3 转 WAV 失败: {stderr.decode()}")
+                err_stderr = stderr.decode().strip()
+                err_stdout = stdout.decode().strip()
+                self.last_error = err_stderr or err_stdout or f"exit_code={process.returncode}"
+                logger.error(f"MP3 转 WAV 失败: {stderr.decode()}: {self.last_error}")
                 return False
 
             logger.info(f"MP3 转 WAV 成功: {wav_path}")
@@ -337,14 +384,15 @@ class AudioService:
             wav_path.unlink(missing_ok=True)
 
             if success:
-                logger.info(f"✅ MP3 转 SILK 成功: {output_path}")
+                logger.info(f"MP3 转 SILK 成功: {output_path}")
             else:
-                logger.error(f"❌ MP3 转 SILK 失败")
+                logger.error(f"MP3 转 SILK 失败")
 
             return success
 
         except Exception as e:
-            logger.error(f"❌ MP3 转 SILK 失败: {str(e)}")
+            self.last_error = str(e)
+            logger.error(f"MP3 转 SILK 失败: {str(e)}")
             return False
 
     async def amr_to_wav(
@@ -385,14 +433,18 @@ class AudioService:
             stdout, stderr = await process.communicate()
 
             if process.returncode != 0:
-                logger.error(f"AMR 转 WAV 失败: {stderr.decode()}")
+                err_stderr = stderr.decode().strip()
+                err_stdout = stdout.decode().strip()
+                self.last_error = err_stderr or err_stdout or f"exit_code={process.returncode}"
+                logger.error(f"AMR 转 WAV 失败: {stderr.decode()}: {self.last_error}")
                 return False
 
-            logger.info(f"✅ AMR 转 WAV 成功: {output_path}")
+            logger.info(f"AMR 转 WAV 成功: {output_path}")
             return True
 
         except Exception as e:
-            logger.error(f"❌ AMR 转 WAV 失败: {str(e)}")
+            self.last_error = str(e)
+            logger.error(f"AMR 转 WAV 失败: {str(e)}")
             return False
 
     async def amr_to_mp3(
@@ -442,10 +494,13 @@ class AudioService:
             stdout, stderr = await process.communicate()
 
             if process.returncode != 0:
-                logger.error(f"WAV 转 MP3 失败: {stderr.decode()}")
+                err_stderr = stderr.decode().strip()
+                err_stdout = stdout.decode().strip()
+                self.last_error = err_stderr or err_stdout or f"exit_code={process.returncode}"
+                logger.error(f"WAV 转 MP3 失败: {stderr.decode()}: {self.last_error}")
                 return False
 
-            logger.info(f"✅ AMR 转 MP3 成功: {output_path}")
+            logger.info(f"AMR 转 MP3 成功: {output_path}")
 
             # 3. 清理临时文件
             wav_path.unlink(missing_ok=True)
@@ -453,7 +508,8 @@ class AudioService:
             return True
 
         except Exception as e:
-            logger.error(f"❌ AMR 转 MP3 失败: {str(e)}")
+            self.last_error = str(e)
+            logger.error(f"AMR 转 MP3 失败: {str(e)}")
             return False
 
     async def amr_to_silk(
@@ -503,14 +559,15 @@ class AudioService:
             wav_path.unlink(missing_ok=True)
 
             if success:
-                logger.info(f"✅ AMR 转 SILK 成功: {output_path}")
+                logger.info(f"AMR 转 SILK 成功: {output_path}")
             else:
-                logger.error(f"❌ AMR 转 SILK 失败")
+                logger.error(f"AMR 转 SILK 失败")
 
             return success
 
         except Exception as e:
-            logger.error(f"❌ AMR 转 SILK 失败: {str(e)}")
+            self.last_error = str(e)
+            logger.error(f"AMR 转 SILK 失败: {str(e)}")
             return False
 
     async def m4a_to_wav(
@@ -550,14 +607,18 @@ class AudioService:
             stdout, stderr = await process.communicate()
 
             if process.returncode != 0:
-                logger.error(f"M4A 转 WAV 失败: {stderr.decode()}")
+                err_stderr = stderr.decode().strip()
+                err_stdout = stdout.decode().strip()
+                self.last_error = err_stderr or err_stdout or f"exit_code={process.returncode}"
+                logger.error(f"M4A 转 WAV 失败: {stderr.decode()}: {self.last_error}")
                 return False
 
-            logger.info(f"✅ M4A 转 WAV 成功: {output_path}")
+            logger.info(f"M4A 转 WAV 成功: {output_path}")
             return True
 
         except Exception as e:
-            logger.error(f"❌ M4A 转 WAV 失败: {str(e)}")
+            self.last_error = str(e)
+            logger.error(f"M4A 转 WAV 失败: {str(e)}")
             return False
 
     async def m4a_to_mp3(
@@ -601,14 +662,18 @@ class AudioService:
             stdout, stderr = await process.communicate()
 
             if process.returncode != 0:
-                logger.error(f"M4A 转 MP3 失败: {stderr.decode()}")
+                err_stderr = stderr.decode().strip()
+                err_stdout = stdout.decode().strip()
+                self.last_error = err_stderr or err_stdout or f"exit_code={process.returncode}"
+                logger.error(f"M4A 转 MP3 失败: {stderr.decode()}: {self.last_error}")
                 return False
 
-            logger.info(f"✅ M4A 转 MP3 成功: {output_path}")
+            logger.info(f"M4A 转 MP3 成功: {output_path}")
             return True
 
         except Exception as e:
-            logger.error(f"❌ M4A 转 MP3 失败: {str(e)}")
+            self.last_error = str(e)
+            logger.error(f"M4A 转 MP3 失败: {str(e)}")
             return False
 
     async def m4a_to_silk(
@@ -655,12 +720,13 @@ class AudioService:
             wav_path.unlink(missing_ok=True)
 
             if success:
-                logger.info(f"✅ M4A 转 SILK 成功: {output_path}")
+                logger.info(f"M4A 转 SILK 成功: {output_path}")
             else:
-                logger.error("❌ M4A 转 SILK 失败")
+                logger.error("M4A 转 SILK 失败")
 
             return success
 
         except Exception as e:
-            logger.error(f"❌ M4A 转 SILK 失败: {str(e)}")
+            self.last_error = str(e)
+            logger.error(f"M4A 转 SILK 失败: {str(e)}")
             return False

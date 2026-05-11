@@ -2,15 +2,13 @@
 音频转换服务
 参考 development.md 第 4.2.3 节、PRD.md 第 2.1.2 节
 """
-import uuid
 import asyncio
 from pathlib import Path
-from typing import Dict, Optional
-from datetime import datetime
+from typing import Dict
 from app.config import settings
 from app.logger import logger
 from app.models.convert import TaskInfo, TaskStatus, ConvertRequest
-from app.models.response import ApiResponse, ErrorCode, ERROR_MESSAGES
+from app.models.response import ApiResponse, ErrorCode
 from app.services.audio_service import AudioService
 from app.services.file_service import FileService
 from app.services.staging_service import StagingService
@@ -178,7 +176,7 @@ class ConvertService:
                     else:
                         task_info.status = TaskStatus.FAILED
                         task_info.error_message = f"不支持从 SILK 转换到 {request.target_format.value}"
-                        logger.error(f"❌ 不支持的转换: SILK → {request.target_format.value}")
+                        logger.error(f"不支持的转换: SILK → {request.target_format.value}")
                         return
 
                 elif input_format == '.wav':
@@ -195,7 +193,7 @@ class ConvertService:
                     else:
                         task_info.status = TaskStatus.FAILED
                         task_info.error_message = f"不支持从 WAV 转换到 {request.target_format.value}"
-                        logger.error(f"❌ 不支持的转换: WAV → {request.target_format.value}")
+                        logger.error(f"不支持的转换: WAV → {request.target_format.value}")
                         return
 
                 elif input_format == '.mp3':
@@ -212,7 +210,7 @@ class ConvertService:
                     else:
                         task_info.status = TaskStatus.FAILED
                         task_info.error_message = f"不支持从 MP3 转换到 {request.target_format.value}"
-                        logger.error(f"❌ 不支持的转换: MP3 → {request.target_format.value}")
+                        logger.error(f"不支持的转换: MP3 → {request.target_format.value}")
                         return
 
                 elif input_format == '.m4a':
@@ -242,7 +240,7 @@ class ConvertService:
                     else:
                         task_info.status = TaskStatus.FAILED
                         task_info.error_message = f"不支持从 M4A 转换到 {request.target_format.value}"
-                        logger.error(f"❌ 不支持的转换: M4A → {request.target_format.value}")
+                        logger.error(f"不支持的转换: M4A → {request.target_format.value}")
                         return
 
                 elif input_format == '.amr':
@@ -271,13 +269,13 @@ class ConvertService:
                     else:
                         task_info.status = TaskStatus.FAILED
                         task_info.error_message = f"不支持从 AMR 转换到 {request.target_format.value}"
-                        logger.error(f"❌ 不支持的转换: AMR → {request.target_format.value}")
+                        logger.error(f"不支持的转换: AMR → {request.target_format.value}")
                         return
 
                 else:
                     task_info.status = TaskStatus.FAILED
                     task_info.error_message = f"不支持的输入格式: {input_format}"
-                    logger.error(f"❌ 不支持的输入格式: {input_format}")
+                    logger.error(f"不支持的输入格式: {input_format}")
                     return
 
                 # 更新进度
@@ -297,19 +295,19 @@ class ConvertService:
                         output_path=output_path
                     )
 
-                    logger.info(f"✅ 转换成功: {task_id}")
+                    logger.info(f"转换成功: {task_id}")
 
                 else:
-                    # 转换失败
+                    # 转换失败，获取 AudioService 的详细错误
                     task_info.status = TaskStatus.FAILED
-                    task_info.error_message = "转换失败"
-
-                    logger.error(f"❌ 转换失败: {task_id}")
+                    detail = self.audio_service.last_error or "未知错误"
+                    task_info.error_message = f"转换失败: {detail}"
+                    logger.error(f"转换失败: {task_id} - {detail}")
 
             except Exception as e:
                 task_info.status = TaskStatus.FAILED
                 task_info.error_message = str(e)
-                logger.error(f"❌ 转换异常: {task_id} - {str(e)}")
+                logger.error(f"转换异常: {task_id} - {str(e)}")
 
     def get_status(self, task_id: str) -> ApiResponse:
         """

@@ -30,7 +30,7 @@ def create_standard_silk(output_path):
     with open(output_path, 'wb') as f:
         f.write(silk_data)
     
-    print(f"✅ 创建标准 SILK 文件: {output_path}")
+    print(f"创建标准 SILK 文件: {output_path}")
     print(f"   大小: {len(silk_data)} bytes")
 
 def create_wechat_silk(output_path):
@@ -51,7 +51,7 @@ def create_wechat_silk(output_path):
     with open(output_path, 'wb') as f:
         f.write(silk_data)
     
-    print(f"✅ 创建微信 SILK 文件: {output_path}")
+    print(f"创建微信 SILK 文件: {output_path}")
     print(f"   大小: {len(silk_data)} bytes")
 
 if __name__ == '__main__':
@@ -61,4 +61,4 @@ if __name__ == '__main__':
     create_standard_silk(os.path.join(fixtures_dir, 'test_standard.silk'))
     create_wechat_silk(os.path.join(fixtures_dir, 'test_wechat.silk'))
     
-    print("\n✅ 测试文件创建完成！")
+    print("\n测试文件创建完成！")

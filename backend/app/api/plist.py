@@ -3,9 +3,9 @@ PLIST API 路由
 参考 PRD.md 第 5.5 节
 """
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
-from app.models.response import ApiResponse, ErrorCode, ERROR_MESSAGES
+from app.models.response import ApiResponse, ErrorCode
 from app.services.plist_service import PlistService
 from app.logger import logger
 from pathlib import Path

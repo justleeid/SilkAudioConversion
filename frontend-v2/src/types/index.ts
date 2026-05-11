@@ -1,11 +1,3 @@
-/**
- * 前端类型定义
- * 参考 development.md 第 4.1.3 节、PRD.md 第 5 节
- */
-
-/**
- * 任务状态枚举
- */
 export enum TaskStatus {
   PENDING = 'pending',
   PROCESSING = 'processing',
@@ -13,9 +5,6 @@ export enum TaskStatus {
   FAILED = 'failed'
 }
 
-/**
- * 目标格式枚举
- */
 export enum TargetFormat {
   WAV = 'WAV',
   MP3 = 'MP3',
@@ -23,18 +12,12 @@ export enum TargetFormat {
   PLIST = 'PLIST'
 }
 
-/**
- * API 响应泛型接口
- */
 export interface ApiResponse<T = any> {
   code: number
   message: string
   data?: T
 }
 
-/**
- * 文件信息接口
- */
 export interface FileInfo {
   task_id: string
   filename: string
@@ -42,9 +25,6 @@ export interface FileInfo {
   format: string
 }
 
-/**
- * 转换请求参数接口
- */
 export interface ConvertParams {
   target_format: TargetFormat
   wechat_compatible?: boolean
@@ -53,9 +33,6 @@ export interface ConvertParams {
   frame_size?: number
 }
 
-/**
- * 任务信息接口
- */
 export interface TaskInfo {
   task_id: string
   status: TaskStatus
@@ -66,34 +43,6 @@ export interface TaskInfo {
   filename?: string
 }
 
-/**
- * 上传进度接口
- */
-export interface UploadProgress {
-  loaded: number
-  total: number
-  percentage: number
-}
-
-/**
- * PLIST 合并请求
- */
-export interface PlistMergeRequest {
-  task_ids: string[]
-  output_filename?: string
-  include_metadata?: boolean
-}
-
-/**
- * PLIST 提取请求
- */
-export interface PlistExtractRequest {
-  plist_file_id: string
-}
-
-/**
- * 暂存区文件信息
- */
 export interface StagingFile {
   file_id: string
   original_name: string
@@ -104,9 +53,6 @@ export interface StagingFile {
   download_url: string
 }
 
-/**
- * 暂存区统计
- */
 export interface StagingStats {
   file_count: number
   total_size: number
@@ -114,17 +60,6 @@ export interface StagingStats {
   cleanup_interval: number
 }
 
-/**
- * 暂存区响应
- */
-export interface StagingResponse {
-  files: StagingFile[]
-  stats: StagingStats
-}
-
-/**
- * 数据库音频记录
- */
 export interface DbAudioRecord {
   audio_id: string
   title: string
@@ -133,9 +68,6 @@ export interface DbAudioRecord {
   format: string
 }
 
-/**
- * 数据库音频查询参数
- */
 export interface DbAudioQueryParams {
   date_start: string
   date_end: string
@@ -144,9 +76,6 @@ export interface DbAudioQueryParams {
   per_page?: number
 }
 
-/**
- * 数据库音频查询结果
- */
 export interface DbAudioQueryResult {
   total: number
   page: number
@@ -154,16 +83,6 @@ export interface DbAudioQueryResult {
   records: DbAudioRecord[]
 }
 
-/**
- * 数据库音频导入请求
- */
-export interface DbAudioImportRequest {
-  audio_ids: string[]
-}
-
-/**
- * 数据库音频导入结果
- */
 export interface DbAudioImportResult {
   imported_count: number
   files: FileInfo[]
