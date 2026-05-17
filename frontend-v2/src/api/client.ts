@@ -1,5 +1,4 @@
 import axios from 'axios'
-import { useMessage } from 'naive-ui'
 
 const api = axios.create({
   baseURL: ''

@@ -69,6 +69,7 @@ export interface DbAudioRecord {
 }
 
 export interface DbAudioQueryParams {
+  source: string
   date_start: string
   date_end: string
   keyword?: string

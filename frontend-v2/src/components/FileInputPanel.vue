@@ -4,13 +4,15 @@
 
     <!-- Upload / DB Import tabs -->
     <n-tabs v-model:value="tab" type="segment" animated>
-      <n-tab-pane name="local" tab="本地上传">
-        <UploadArea />
-      </n-tab-pane>
-      <n-tab-pane name="database" tab="数据库导入">
-        <DbAudioImport />
-      </n-tab-pane>
+      <n-tab-pane name="local" tab="本地上传" />
+      <n-tab-pane name="database" tab="数据库导入" />
     </n-tabs>
+    <div v-show="tab === 'local'">
+      <UploadArea />
+    </div>
+    <div v-show="tab === 'database'">
+      <DbAudioImport />
+    </div>
 
     <!-- Uploaded files list -->
     <div v-if="store.files.length > 0" class="space-y-2">

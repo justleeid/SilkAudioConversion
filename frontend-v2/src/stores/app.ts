@@ -4,12 +4,25 @@ import type { FileInfo, TaskInfo, ConvertParams } from '@/types'
 import { upload, convert, queryStatus } from '@/api/convert'
 import { TaskStatus } from '@/types'
 
+export interface DbAudioQueryCache {
+  source: string
+  dateRange: [string, string]
+  keyword: string
+  page: number
+  perPage: number
+  searched: boolean
+  total: number
+  records: any[]
+  checked: string[]
+}
+
 export const useAppStore = defineStore('app', () => {
   const files = ref<FileInfo[]>([])
   const tasks = ref<Map<string, TaskInfo>>(new Map())
   const uploading = ref(false)
   const converting = ref(false)
   const selectedForPlist = ref<Set<string>>(new Set())
+  const dbAudioQueryCache = ref<DbAudioQueryCache | null>(null)
 
   const hasFiles = computed(() => files.value.length > 0)
 
@@ -87,15 +100,6 @@ export const useAppStore = defineStore('app', () => {
     selectedForPlist.value.delete(taskId)
   }
 
-  function removeFiles(taskIds: string[]) {
-    const idSet = new Set(taskIds)
-    files.value = files.value.filter((f) => !idSet.has(f.task_id))
-    taskIds.forEach((id) => {
-      tasks.value.delete(id)
-      selectedForPlist.value.delete(id)
-    })
-  }
-
   function clearCompletedTasks() {
     completedTasks.value.forEach((task) => {
       tasks.value.delete(task.task_id)
@@ -120,13 +124,21 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  function selectAllSilkForPlist() {
-    const silkFiles = files.value.filter((f) => f.format.toLowerCase() === 'silk')
-    silkFiles.forEach((f) => selectedForPlist.value.add(f.task_id))
-  }
-
   function clearPlistSelection() {
     selectedForPlist.value.clear()
+  }
+
+  function saveDbAudioQueryCache(cache: DbAudioQueryCache) {
+    dbAudioQueryCache.value = {
+      ...cache,
+      dateRange: [...cache.dateRange] as [string, string],
+      checked: [...cache.checked],
+      records: cache.records.map((r) => ({ ...r }))
+    }
+  }
+
+  function clearDbAudioQueryCache() {
+    dbAudioQueryCache.value = null
   }
 
   // Staging version counter for cross-panel reactivity
@@ -135,10 +147,11 @@ export const useAppStore = defineStore('app', () => {
 
   return {
     files, tasks, uploading, converting, selectedForPlist, stagingVersion,
+    dbAudioQueryCache,
     hasFiles, completedTasks, activeTasks,
-    uploadFiles, startConversion, removeFile, removeFiles,
-    clearCompletedTasks, reset,
-    togglePlistSelection, selectAllSilkForPlist, clearPlistSelection,
-    triggerStagingRefresh
+    uploadFiles, startConversion, removeFile, clearCompletedTasks,
+    reset, togglePlistSelection, clearPlistSelection,
+    triggerStagingRefresh,
+    saveDbAudioQueryCache, clearDbAudioQueryCache
   }
 })

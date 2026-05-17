@@ -27,8 +27,12 @@ export default defineConfig({
     port: 5174,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
-        changeOrigin: true
+        // use 127.0.0.1 to avoid localhost DNS/IPv6 resolution issues
+        target: 'http://127.0.0.1:8000',
+        changeOrigin: true,
+        // increase proxy timeouts (ms)
+        proxyTimeout: 60000,
+        timeout: 60000
       }
     }
   }

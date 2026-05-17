@@ -4,3 +4,4 @@ python-multipart==0.0.6
 loguru==0.7.0
 pydantic-settings==2.1.0
 mysql-connector-python==8.2.0
+pyodbc>=5.0.0

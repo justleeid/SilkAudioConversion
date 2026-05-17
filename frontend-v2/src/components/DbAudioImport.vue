@@ -2,6 +2,16 @@
   <div class="space-y-3">
     <!-- Filters -->
     <div class="space-y-2">
+      <!-- Source selector -->
+      <div>
+        <div class="text-xs text-gray-400 mb-1">数据源</div>
+        <n-select
+          v-model:value="source"
+          :options="sourceOptions"
+          size="small"
+          @update:value="onSourceChange"
+        />
+      </div>
       <!-- Date range row -->
       <div>
         <div class="text-xs text-gray-400 mb-1">时间范围</div>
@@ -9,6 +19,7 @@
           v-model:formatted-value="dateRange"
           type="daterange"
           :default-value="defaultRange"
+          :show-confirm="false"
           clearable
           class="w-full"
         />
@@ -56,7 +67,15 @@
             @update:checked="toggleCheck(row.audio_id)"
           />
           <div class="flex-1 min-w-0">
-            <div class="text-sm text-gray-800 dark:text-gray-200 truncate">{{ row.title }}</div>
+            <template v-if="editingId === row.audio_id">
+              <div class="flex items-center gap-1">
+                <n-input v-model:value="editTitleValue" size="tiny" class="flex-1"
+                  @keyup.enter="confirmEditTitle(row)" @keyup.escape="cancelEditTitle" />
+                <n-button size="tiny" type="primary" @click="confirmEditTitle(row)">确定</n-button>
+                <n-button size="tiny" @click="cancelEditTitle">取消</n-button>
+              </div>
+            </template>
+            <div v-else class="text-sm text-gray-800 dark:text-gray-200 truncate">{{ row.title }}</div>
             <div class="flex items-center gap-2 text-xs text-gray-400">
               <span>{{ formatSize(row.size) }}</span>
               <n-tag :bordered="false" size="tiny">{{ row.format }}</n-tag>
@@ -71,6 +90,15 @@
           >
             {{ playingId === row.audio_id ? '⏹' : '▶' }}
           </n-button>
+          <!-- Admin actions -->
+          <div v-if="adminEnabled" class="flex items-center gap-1 shrink-0">
+            <n-button size="tiny" quaternary type="warning" @click="startEditTitle(row)">
+              ✎
+            </n-button>
+            <n-button size="tiny" quaternary type="error" @click="doDeleteRecord(row)">
+              ✕
+            </n-button>
+          </div>
         </div>
       </div>
 
@@ -90,21 +118,28 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import {
-  NDatePicker, NInput, NButton, NCheckbox, NTag, NEmpty, NPagination, useMessage
+  NDatePicker, NInput, NButton, NSelect, NCheckbox, NTag, NEmpty, NPagination,
+  useMessage, useDialog
 } from 'naive-ui'
 import type { DbAudioRecord } from '@/types'
-import { queryDbAudio, importDbAudio } from '@/api/convert'
+import { queryDbAudio, importDbAudio, getAdminStatus, deleteDbAudioRecord, updateDbAudioTitle } from '@/api/convert'
 import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
 const message = useMessage()
+const dialog = useDialog()
 
 const today = new Date()
 const defaultDate = new Date(today.getTime() - 30 * 24 * 3600 * 1000)
 const fmt = (d: Date) => d.toISOString().slice(0, 10)
 
+const source = ref('mssql')
+const sourceOptions = [
+  { label: 'MySQL', value: 'mysql' },
+  { label: 'SQL Server', value: 'mssql' },
+]
 const dateRange = ref<[string, string]>([fmt(defaultDate), fmt(today)])
 const defaultRange = ref<[number, number]>([defaultDate.getTime(), today.getTime()])
 const keyword = ref('')
@@ -120,6 +155,59 @@ const checked = ref<string[]>([])
 
 const audioRef = ref<HTMLAudioElement | null>(null)
 const playingId = ref<string | null>(null)
+
+// Admin mode
+const adminEnabled = ref(false)
+const editingId = ref<string | null>(null)
+const editTitleValue = ref('')
+
+function onSourceChange() {
+  searched.value = false
+  records.value = []
+  total.value = 0
+  checked.value = []
+  page.value = 1
+  store.saveDbAudioQueryCache({
+    source: source.value,
+    dateRange: [...dateRange.value] as [string, string],
+    keyword: keyword.value,
+    page: 1,
+    perPage,
+    searched: false,
+    total: 0,
+    records: [],
+    checked: []
+  })
+}
+
+function hydrateFromCache() {
+  const cache = store.dbAudioQueryCache
+  if (!cache) return false
+
+  source.value = cache.source
+  dateRange.value = [...cache.dateRange] as [string, string]
+  keyword.value = cache.keyword
+  page.value = cache.page
+  searched.value = cache.searched
+  records.value = cache.records as DbAudioRecord[]
+  total.value = cache.total
+  checked.value = [...cache.checked]
+  return true
+}
+
+function syncCache() {
+  store.saveDbAudioQueryCache({
+    source: source.value,
+    dateRange: [...dateRange.value] as [string, string],
+    keyword: keyword.value,
+    page: page.value,
+    perPage,
+    searched: searched.value,
+    total: total.value,
+    records: records.value,
+    checked: checked.value
+  })
+}
 
 function toggleCheck(id: string) {
   const i = checked.value.indexOf(id)
@@ -137,6 +225,7 @@ async function search() {
   checked.value = []
   try {
     const r = await queryDbAudio({
+      source: source.value,
       date_start: dateRange.value[0],
       date_end: dateRange.value[1],
       keyword: keyword.value || undefined,
@@ -146,10 +235,12 @@ async function search() {
     if (r.data) {
       records.value = r.data.records
       total.value = r.data.total
+      syncCache()
     }
   } catch {
     records.value = []
     total.value = 0
+    syncCache()
   } finally {
     loading.value = false
   }
@@ -162,6 +253,7 @@ function clear() {
   total.value = 0
   searched.value = false
   checked.value = []
+  store.clearDbAudioQueryCache()
 }
 
 function onPage(p: number) { page.value = p; search() }
@@ -170,7 +262,7 @@ async function doImport() {
   if (!checked.value.length) return
   importing.value = true
   try {
-    const r = await importDbAudio(checked.value)
+    const r = await importDbAudio(checked.value, source.value)
     if (r.data) {
       r.data.files.forEach((f) => {
         store.files.push(f)
@@ -178,6 +270,7 @@ async function doImport() {
       })
       message.success(`已导入 ${r.data.imported_count} 个文件`)
       checked.value = []
+      syncCache()
     }
   } catch { /**/ }
   finally { importing.value = false }
@@ -188,7 +281,7 @@ function isPlayable(fmt: string) { return ['WAV', 'MP3', 'M4A'].includes(fmt?.to
 function togglePlay(row: DbAudioRecord) {
   const a = audioRef.value; if (!a) return
   if (playingId.value === row.audio_id) { a.pause(); playingId.value = null; return }
-  a.src = `/api/db-audio/preview/${row.audio_id}`
+  a.src = `/api/db-audio/preview/${row.audio_id}?source=${source.value}`
   a.play().catch(() => message.warning('无法播放'))
   playingId.value = row.audio_id
 }
@@ -203,4 +296,65 @@ function formatDate(s: string) {
   if (!s) return ''
   return s.replace('T', ' ').slice(0, 19)
 }
+
+// -- Admin actions --
+
+async function checkAdminStatus() {
+  try {
+    const r = await getAdminStatus()
+    adminEnabled.value = r.data?.admin_enabled ?? false
+  } catch { adminEnabled.value = false }
+}
+
+function startEditTitle(row: DbAudioRecord) {
+  editingId.value = row.audio_id
+  editTitleValue.value = row.title === '(无标题)' ? '' : row.title
+}
+
+function cancelEditTitle() {
+  editingId.value = null
+  editTitleValue.value = ''
+}
+
+async function confirmEditTitle(row: DbAudioRecord) {
+  const v = editTitleValue.value.trim()
+  if (!v) { message.warning('标题不能为空'); return }
+  try {
+    const r = await updateDbAudioTitle(row.audio_id, v, source.value)
+    if (r.code === 0) {
+      message.success('标题已更新')
+      cancelEditTitle()
+      await search()
+    } else {
+      message.error(r.message || '修改失败')
+    }
+  } catch { message.error('修改失败') }
+}
+
+async function doDeleteRecord(row: DbAudioRecord) {
+  dialog.warning({
+    title: '确认删除',
+    content: `将删除「${row.title}」的音频记录及关联聊天记录，此操作不可恢复。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        const r = await deleteDbAudioRecord(row.audio_id, source.value)
+        if (r.code === 0) {
+          message.success('已删除')
+          checked.value = checked.value.filter((id) => id !== row.audio_id)
+          await search()
+          syncCache()
+        } else {
+          message.error(r.message || '删除失败')
+        }
+      } catch { message.error('删除失败') }
+    }
+  })
+}
+
+onMounted(() => {
+  hydrateFromCache()
+  checkAdminStatus()
+})
 </script>

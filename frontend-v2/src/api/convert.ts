@@ -70,7 +70,24 @@ export async function queryDbAudio(params: DbAudioQueryParams): Promise<ApiRespo
   return data
 }
 
-export async function importDbAudio(audioIds: string[]): Promise<ApiResponse<DbAudioImportResult>> {
-  const { data } = await client.post('/api/db-audio/import', { audio_ids: audioIds })
+export async function importDbAudio(audioIds: string[], source: string = 'mysql'): Promise<ApiResponse<DbAudioImportResult>> {
+  const { data } = await client.post('/api/db-audio/import', { audio_ids: audioIds, source })
+  return data
+}
+
+// -- 数据库管理 --
+
+export async function getAdminStatus(): Promise<ApiResponse<{ admin_enabled: boolean }>> {
+  const { data } = await client.get('/api/db-audio/admin/status')
+  return data
+}
+
+export async function deleteDbAudioRecord(audioId: string, source: string): Promise<ApiResponse<{ affected: number }>> {
+  const { data } = await client.delete(`/api/db-audio/record/${audioId}`, { params: { source } })
+  return data
+}
+
+export async function updateDbAudioTitle(audioId: string, title: string, source: string): Promise<ApiResponse<{ affected: number }>> {
+  const { data } = await client.put(`/api/db-audio/record/${audioId}/title`, { title, source })
   return data
 }
