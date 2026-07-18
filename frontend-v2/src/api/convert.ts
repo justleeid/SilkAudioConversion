@@ -36,6 +36,51 @@ export async function mergePlist(params: {
   return data
 }
 
+export interface PlistPreviewEntry {
+  key: string
+  data_size: number
+  decoded_size: number
+}
+
+export interface PlistPreviewData {
+  file_id: string
+  filename: string
+  total_entries: number
+  entries: PlistPreviewEntry[]
+}
+
+export interface PlistSplitParams {
+  plist_file_id: string
+  split_count: number
+  split_mode: 'even' | 'manual'
+  output_prefix?: string
+  custom_assignments?: Array<{
+    file_index: number
+    keys: string[]
+  }>
+}
+
+export interface PlistSplitResult {
+  total_entries: number
+  split_count: number
+  files: Array<{
+    file_id: string
+    filename: string
+    entry_count: number
+    entries: string[]
+  }>
+}
+
+export async function previewPlist(fileId: string): Promise<ApiResponse<PlistPreviewData>> {
+  const { data } = await client.get(`/api/plist/preview/${fileId}`)
+  return data
+}
+
+export async function splitPlist(params: PlistSplitParams): Promise<ApiResponse<PlistSplitResult>> {
+  const { data } = await client.post('/api/plist/split', params)
+  return data
+}
+
 // -- 暂存区 --
 
 export async function getStaging(): Promise<ApiResponse<{ files: StagingFile[]; stats: StagingStats }>> {

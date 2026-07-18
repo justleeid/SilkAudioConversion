@@ -12,41 +12,125 @@
         />
       </n-form-item>
 
-      <!-- PLIST hint -->
-      <n-alert
-        v-if="fmt === 'PLIST'"
-        type="info"
-        title="PLIST 模式：将选中的 SILK 文件合并为 iOS 预定义语音格式"
-        class="mb-4"
-      />
+      <!-- PLIST mode switcher -->
+      <div v-if="fmt === 'PLIST'" class="space-y-4">
+        <n-radio-group v-model:value="store.plistMode" size="medium">
+          <n-radio-button value="merge">合并</n-radio-button>
+          <n-radio-button value="split">拆分</n-radio-button>
+        </n-radio-group>
 
-      <!-- PLIST filename -->
-      <n-form-item v-if="fmt === 'PLIST'" label="输出文件名">
-        <n-input v-model:value="plistName" placeholder="voices">
-          <template #suffix>.plist</template>
-        </n-input>
-      </n-form-item>
+        <!-- PLIST Merge Mode -->
+        <template v-if="store.plistMode === 'merge'">
+          <n-alert type="info" title="合并模式：将选中的 SILK 文件合并为 iOS 预定义语音格式" />
 
-      <!-- PLIST SILK file picker -->
-      <div v-if="fmt === 'PLIST'" class="space-y-2 mb-4">
-        <div class="text-xs text-gray-500">选择 SILK 文件（上传区 + 暂存区）</div>
-        <n-button size="small" quaternary @click="selectAllSilk()">全选</n-button>
-        <div class="space-y-1 max-h-48 overflow-y-auto">
-          <div
-            v-for="f in silkFiles"
-            :key="f.task_id"
-            class="flex items-center gap-2 px-2 py-1 rounded bg-white dark:bg-[#1e1e22] border border-gray-100 dark:border-gray-800"
-          >
-            <n-checkbox
-              :checked="store.selectedForPlist.has(f.task_id)"
-              size="small"
-              @update:checked="store.togglePlistSelection(f.task_id)"
-            />
-            <span class="text-sm text-gray-800 dark:text-gray-200 truncate flex-1">{{ f.filename }}</span>
-            <span class="text-xs text-gray-400">{{ formatSize(f.size) }}</span>
+          <n-form-item label="输出文件名">
+            <n-input v-model:value="plistName" placeholder="voices">
+              <template #suffix>.plist</template>
+            </n-input>
+          </n-form-item>
+
+          <div class="space-y-2">
+            <div class="text-xs text-gray-500">选择 SILK 文件（上传区 + 暂存区）</div>
+            <n-button size="small" quaternary @click="selectAllSilk()">全选</n-button>
+            <div class="space-y-1 max-h-48 overflow-y-auto">
+              <div
+                v-for="f in silkFiles"
+                :key="f.task_id"
+                class="flex items-center gap-2 px-2 py-1 rounded bg-white dark:bg-[#1e1e22] border border-gray-100 dark:border-gray-800"
+              >
+                <n-checkbox
+                  :checked="store.selectedForPlist.has(f.task_id)"
+                  size="small"
+                  @update:checked="store.togglePlistSelection(f.task_id)"
+                />
+                <span class="text-sm text-gray-800 dark:text-gray-200 truncate flex-1">{{ f.filename }}</span>
+                <span class="text-xs text-gray-400">{{ formatSize(f.size) }}</span>
+              </div>
+            </div>
+            <div class="text-xs text-gray-400">已选 {{ store.selectedForPlist.size }} 个</div>
           </div>
-        </div>
-        <div class="text-xs text-gray-400">已选 {{ store.selectedForPlist.size }} 个</div>
+        </template>
+
+        <!-- PLIST Split Mode -->
+        <template v-if="store.plistMode === 'split'">
+          <n-alert type="info" title="拆分模式：将一个成品 PLIST 文件拆分为多个独立文件" />
+
+          <!-- Upload PLIST for split -->
+          <n-upload
+            :max="1"
+            accept=".plist"
+            :custom-request="handlePlistUpload"
+            :show-file-list="false"
+          >
+            <n-button block>选择 PLIST 文件</n-button>
+          </n-upload>
+
+          <!-- Preview loading -->
+          <n-spin v-if="store.splitLoading" size="small" class="w-full flex justify-center py-4" />
+
+          <!-- Preview and split settings -->
+          <template v-if="store.splitPreviewData && !store.splitLoading">
+            <div class="text-xs text-gray-500">
+              文件预览（共 {{ store.splitPreviewData.total_entries }} 个条目）
+            </div>
+
+            <!-- Entry list -->
+            <div class="space-y-1 max-h-36 overflow-y-auto">
+              <div
+                v-for="entry in store.splitPreviewData.entries"
+                :key="entry.key"
+                class="flex items-center gap-2 px-2 py-1 rounded bg-white dark:bg-[#1e1e22] border border-gray-100 dark:border-gray-800"
+              >
+                <span class="text-sm text-gray-800 dark:text-gray-200 truncate flex-1">{{ entry.key }}</span>
+                <span class="text-xs text-gray-400">{{ formatSize(entry.decoded_size) }}</span>
+              </div>
+            </div>
+
+            <!-- Split settings -->
+            <div class="space-y-3 pt-2 border-t border-gray-100 dark:border-gray-800">
+              <div class="text-xs text-gray-500 font-medium">拆分设置</div>
+
+              <n-form-item label="拆分数量" label-placement="left" size="small">
+                <n-input-number
+                  v-model:value="store.splitCount"
+                  :min="1"
+                  :max="store.splitPreviewData.total_entries"
+                  size="small"
+                  class="w-24"
+                />
+                <span v-if="store.splitCount === 1" class="ml-2 text-xs text-amber-500">
+                  拆分为 1 个文件等于不拆分
+                </span>
+              </n-form-item>
+
+              <!-- TODO: 手动分配模式暂未实现，后续版本支持 -->
+              <!-- <n-form-item label="拆分方式" label-placement="left" size="small">
+                <n-radio-group v-model:value="store.splitMode" size="small">
+                  <n-radio value="even">均匀分配</n-radio>
+                  <n-radio value="manual">手动分配</n-radio>
+                </n-radio-group>
+              </n-form-item> -->
+
+              <n-form-item label="文件前缀" label-placement="left" size="small">
+                <n-input v-model:value="store.outputPrefix" size="small" placeholder="split" />
+              </n-form-item>
+
+              <!-- Split preview -->
+              <div v-if="store.splitMode === 'even'" class="space-y-1">
+                <div class="text-xs text-gray-500">分配预览</div>
+                <div class="max-h-36 overflow-y-auto space-y-1">
+                  <div
+                    v-for="(group, idx) in splitPreviewGroups"
+                    :key="idx"
+                    class="text-xs px-2 py-1 rounded bg-gray-50 dark:bg-gray-900"
+                  >
+                    {{ store.outputPrefix }}_{{ idx + 1 }}.plist（{{ group.count }} 个条目）
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+        </template>
       </div>
 
       <!-- Sample rate (non-PLIST) -->
@@ -83,11 +167,11 @@
       <n-button
         type="primary"
         block
-        :loading="store.converting"
+        :loading="store.converting || store.splitLoading"
         :disabled="disabled"
         @click="handleConvert"
       >
-        {{ fmt === 'PLIST' ? '合并为 PLIST' : '开始转换' }}
+        {{ buttonText }}
       </n-button>
     </n-form>
   </div>
@@ -96,11 +180,14 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import {
-  NForm, NFormItem, NSelect, NInput, NSwitch, NButton, NAlert, NCheckbox, useMessage
+  NForm, NFormItem, NSelect, NInput, NSwitch, NButton, NAlert, NCheckbox,
+  NRadioGroup, NRadio, NRadioButton, NInputNumber, NUpload, NSpin,
+  useMessage
 } from 'naive-ui'
+import type { UploadCustomRequestOptions } from 'naive-ui'
 import { TargetFormat, TaskStatus } from '@/types'
 import { useAppStore } from '@/stores/app'
-import { mergePlist, getStaging } from '@/api/convert'
+import { mergePlist, getStaging, upload as uploadFiles } from '@/api/convert'
 import type { StagingFile } from '@/types'
 
 const store = useAppStore()
@@ -169,8 +256,31 @@ const silkFiles = computed<Selectable[]>(() => {
 })
 
 const disabled = computed(() => {
-  if (fmt.value === 'PLIST') return store.selectedForPlist.size === 0
+  if (fmt.value === 'PLIST') {
+    if (store.plistMode === 'merge') return store.selectedForPlist.size === 0
+    // 拆分模式：需要有预览数据，且拆分数量 >= 2
+    return !store.splitPreviewData || store.splitCount < 2
+  }
   return !store.hasFiles
+})
+
+const buttonText = computed(() => {
+  if (fmt.value === 'PLIST') {
+    return store.plistMode === 'merge' ? '合并为 PLIST' : '开始拆分'
+  }
+  return '开始转换'
+})
+
+// Split preview groups for even mode
+const splitPreviewGroups = computed(() => {
+  if (!store.splitPreviewData) return []
+  const total = store.splitPreviewData.total_entries
+  const count = store.splitCount
+  const base = Math.floor(total / count)
+  const remainder = total % count
+  return Array.from({ length: count }, (_, i) => ({
+    count: base + (i < remainder ? 1 : 0)
+  }))
 })
 
 async function loadStagingSilk() {
@@ -193,28 +303,77 @@ function selectAllSilk() {
   }
 }
 
-watch(() => fmt.value, (v) => { if (v === 'PLIST') loadStagingSilk() })
+async function handlePlistUpload({ file }: UploadCustomRequestOptions) {
+  if (!file.file) return
+
+  try {
+    // 使用底层 API 上传，不污染 store.files 列表
+    const { upload } = await import('@/api/convert')
+    const result = await upload([file.file])
+
+    if (result.data?.files?.length) {
+      const uploadedFile = result.data.files[0]
+      // 加载预览
+      const success = await store.loadPlistPreview(uploadedFile.task_id)
+      if (success) {
+        message.success('PLIST 文件已加载')
+      } else {
+        message.error('加载 PLIST 预览失败')
+      }
+    } else {
+      message.error('上传失败')
+    }
+  } catch {
+    message.error('上传失败')
+  }
+}
+
+watch(() => fmt.value, (v) => {
+  if (v === 'PLIST') {
+    loadStagingSilk()
+    store.setPlistMode('merge')
+  } else {
+    store.clearSplitState()
+  }
+})
 watch(() => store.stagingVersion, () => { if (fmt.value === 'PLIST') loadStagingSilk() })
 
 async function handleConvert() {
   if (fmt.value === 'PLIST') {
-    const ids = Array.from(store.selectedForPlist)
-    if (!ids.length) { message.warning('请选择 SILK 文件'); return }
-    store.converting = true
-    try {
-      const r = await mergePlist({ task_ids: ids, output_filename: plistName.value + '.plist' })
-      if (r.code === 0 && r.data) {
-        store.tasks.set(r.data.file_id, {
-          task_id: r.data.file_id, status: TaskStatus.COMPLETED, progress: 100,
-          download_url: r.data.download_url, filename: r.data.filename
-        })
-        message.success('PLIST 合并成功')
-        store.clearPlistSelection()
-      } else {
-        message.error(r.message || '合并失败')
-      }
-    } catch { message.error('合并失败') }
-    finally { store.converting = false }
+    if (store.plistMode === 'merge') {
+      // Merge mode
+      const ids = Array.from(store.selectedForPlist)
+      if (!ids.length) { message.warning('请选择 SILK 文件'); return }
+      store.converting = true
+      try {
+        const r = await mergePlist({ task_ids: ids, output_filename: plistName.value + '.plist' })
+        if (r.code === 0 && r.data) {
+          store.tasks.set(r.data.file_id, {
+            task_id: r.data.file_id, status: TaskStatus.COMPLETED, progress: 100,
+            download_url: r.data.download_url, filename: r.data.filename
+          })
+          message.success('PLIST 合并成功')
+          store.clearPlistSelection()
+        } else {
+          message.error(r.message || '合并失败')
+        }
+      } catch { message.error('合并失败') }
+      finally { store.converting = false }
+    } else {
+      // Split mode
+      if (!store.splitPreviewData) { message.warning('请先上传 PLIST 文件'); return }
+      store.splitLoading = true
+      try {
+        const success = await store.executePlistSplit()
+        if (success) {
+          message.success('PLIST 拆分成功')
+          store.triggerStagingRefresh()
+        } else {
+          message.error('拆分失败')
+        }
+      } catch { message.error('拆分失败') }
+      finally { store.splitLoading = false }
+    }
     return
   }
 

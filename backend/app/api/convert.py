@@ -74,22 +74,28 @@ async def download(task_id: str):
     from app.models.response import ApiResponse, ErrorCode
     from app.services.staging_service import StagingService
 
-    # 查找输出文件
-    output_dir = Path(settings.output_dir)
-    files = list(output_dir.glob(f"{task_id}_output.*"))
-
-    if not files:
-        return ApiResponse(
-            code=ErrorCode.NOT_FOUND,
-            message="文件不存在或已过期"
-        )
-
-    file_path = files[0]
-    
-    # 从暂存区获取原始文件名
+    # 从暂存区元数据获取文件信息（优先）
     staging = StagingService()
     staging_file = staging.get_file(task_id)
-    
+
+    if staging_file and staging_file.file_path:
+        file_path = Path(staging_file.file_path)
+        if not file_path.exists():
+            return ApiResponse(
+                code=ErrorCode.NOT_FOUND,
+                message="文件不存在或已过期"
+            )
+    else:
+        # 降级方案：查找输出文件
+        output_dir = Path(settings.output_dir)
+        files = list(output_dir.glob(f"{task_id}_output.*"))
+        if not files:
+            return ApiResponse(
+                code=ErrorCode.NOT_FOUND,
+                message="文件不存在或已过期"
+            )
+        file_path = files[0]
+
     if staging_file:
         # 使用原始文件名去掉扩展名，加上目标格式后缀
         import os

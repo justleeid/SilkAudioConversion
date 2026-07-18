@@ -24,6 +24,7 @@ class StagingFile(BaseModel):
     created_at: str
     expires_at: str
     download_url: str
+    file_path: str = ""  # 磁盘上的实际文件路径
 
 
 class StagingService:
@@ -167,7 +168,8 @@ class StagingService:
             size=size,
             created_at=now.isoformat(),
             expires_at=expires.isoformat(),
-            download_url=f"/api/download/{file_id}"
+            download_url=f"/api/download/{file_id}",
+            file_path=str(output_path.resolve())
         )
 
         self._metadata[file_id] = staging_file.model_dump()
@@ -216,6 +218,30 @@ class StagingService:
                         if name.startswith(fid + "_"):
                             upload_name_map[fid] = self._strip_task_prefixes(name[len(fid) + 1:])
                             break
+
+        # 对于 metadata 中已存在的记录，也检查对应文件是否存在（支持非 _output 命名模式）
+        for file_id, data in self._metadata.items():
+            if file_id in disk_map:
+                continue
+            # 优先使用存储的文件路径
+            stored_path = data.get("file_path", "")
+            if stored_path:
+                candidate = Path(stored_path)
+                if candidate.exists():
+                    disk_map[file_id] = candidate
+                    continue
+            # 检查元数据中记录的文件名是否存在于磁盘
+            output_name = data.get("output_name")
+            if output_name:
+                candidate = self.staging_dir / output_name
+                if candidate.exists():
+                    disk_map[file_id] = candidate
+                    continue
+            # 递归搜索子目录中的匹配文件
+            for f in self.staging_dir.glob("**/*"):
+                if f.is_file() and f.parent != self.staging_dir and f.name.startswith(file_id):
+                    disk_map[file_id] = f
+                    break
 
         # 删除内存中已不存在的文件记录
         stale_ids = [fid for fid in self._metadata.keys() if fid not in disk_map]
@@ -327,9 +353,33 @@ class StagingService:
     def delete_file(self, file_id: str) -> bool:
         """删除暂存文件"""
         try:
-            # 删除文件
-            for f in self.staging_dir.glob(f"{file_id}_*"):
-                f.unlink()
+            parent_dir = None
+
+            # 优先通过 file_path 精确定位（支持子目录中的文件）
+            data = self._metadata.get(file_id)
+            if data:
+                stored_path = data.get("file_path", "")
+                if stored_path:
+                    p = Path(stored_path)
+                    if p.exists():
+                        parent_dir = p.parent
+                        p.unlink()
+
+            # 兜底：搜索顶层目录和子目录中匹配的文件
+            for f in self.staging_dir.glob(f"**/{file_id}_*"):
+                if f.is_file():
+                    parent_dir = f.parent
+                    f.unlink()
+
+            # 如果文件在子目录中（如 split_xxx），清理空的子目录
+            if parent_dir and parent_dir != self.staging_dir and parent_dir.exists():
+                try:
+                    # 只删除空目录
+                    if not any(parent_dir.iterdir()):
+                        parent_dir.rmdir()
+                        logger.info(f"已清理空子目录: {parent_dir}")
+                except OSError:
+                    pass
 
             # 删除元数据
             self._metadata.pop(file_id, None)

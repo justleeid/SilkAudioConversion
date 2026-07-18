@@ -4,6 +4,7 @@
 """
 import subprocess
 import asyncio
+import platform
 from pathlib import Path
 from app.config import settings
 from app.logger import logger
@@ -13,9 +14,35 @@ from app.utils.file_header import FileHeaderChecker
 class AudioService:
     """音频编解码服务"""
 
+    @staticmethod
+    def _resolve_windows_silk_bin(configured: Path, kind: str) -> Path:
+        """在 Windows 环境下优先使用 windows 目录里的 .exe 编解码器。"""
+        if platform.system() != 'Windows':
+            return configured
+
+        name = configured.name.lower()
+        target_kind = 'encoder' if kind == 'encoder' else 'decoder'
+
+        # 已显式配置为 .exe 时按配置使用
+        if configured.suffix.lower() == '.exe':
+            return configured
+
+        # 常见误配：../tools/silk-v3-decoder/silk/encoder|decoder（Linux 二进制）
+        if name in {'encoder', 'decoder'}:
+            repo_root = Path(__file__).resolve().parents[3]
+            win_bin = repo_root / 'tools' / 'silk-v3-decoder' / 'windows' / f'silk_v3_{target_kind}.exe'
+            if win_bin.exists():
+                logger.warning(
+                    f"检测到 Windows 环境下的 Linux {target_kind} 路径配置，"
+                    f"自动切换为: {win_bin}"
+                )
+                return win_bin
+
+        return configured
+
     def __init__(self):
-        self.decoder_path = Path(settings.silk_decoder_bin)
-        self.encoder_path = Path(settings.silk_encoder_bin)
+        self.decoder_path = self._resolve_windows_silk_bin(Path(settings.silk_decoder_bin), 'decoder')
+        self.encoder_path = self._resolve_windows_silk_bin(Path(settings.silk_encoder_bin), 'encoder')
         self.temp_dir = Path(settings.temp_dir)
         self.output_dir = Path(settings.output_dir)
         self.last_error: str = ""

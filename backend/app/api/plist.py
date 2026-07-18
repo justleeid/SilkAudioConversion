@@ -2,7 +2,7 @@
 PLIST API 路由
 参考 PRD.md 第 5.5 节
 """
-from typing import List, Optional
+from typing import List, Optional, Dict
 from fastapi import APIRouter
 from pydantic import BaseModel
 from app.models.response import ApiResponse, ErrorCode
@@ -16,6 +16,26 @@ router = APIRouter(prefix="/api/plist", tags=["plist"])
 plist_service = PlistService()
 
 
+def find_plist_file(file_id: str):
+    """
+    查找 PLIST 文件（公共函数）
+
+    Args:
+        file_id: 文件 ID
+
+    Returns:
+        文件路径，未找到返回 None
+    """
+    output_path = Path(settings.output_dir)
+    upload_path = Path(settings.upload_dir)
+
+    files = list(output_path.glob(f"{file_id}_*"))
+    if not files:
+        files = list(upload_path.glob(f"{file_id}_*"))
+
+    return files[0] if files else None
+
+
 class PlistMergeRequest(BaseModel):
     """PLIST 合并请求"""
     task_ids: List[str]
@@ -26,6 +46,15 @@ class PlistMergeRequest(BaseModel):
 class PlistExtractRequest(BaseModel):
     """PLIST 提取请求"""
     plist_file_id: str
+
+
+class PlistSplitRequest(BaseModel):
+    """PLIST 拆分请求"""
+    plist_file_id: str
+    split_count: int
+    split_mode: str = "even"  # "even" 或 "manual"
+    output_prefix: str = "split"
+    custom_assignments: Optional[List[Dict]] = None
 
 
 @router.post("/merge", response_model=ApiResponse)
@@ -123,22 +152,13 @@ async def merge_silk_to_plist(request: PlistMergeRequest):
 async def extract_plist_to_silk(request: PlistExtractRequest):
     """从 PLIST 提取 SILK 文件"""
     try:
-        # 先查 output_dir，再查 uploads
-        output_path = Path(settings.output_dir)
-        upload_path = Path(settings.upload_dir)
-        plist_path = None
+        plist_path = find_plist_file(request.plist_file_id)
 
-        files = list(output_path.glob(f"{request.plist_file_id}_*"))
-        if not files:
-            files = list(upload_path.glob(f"{request.plist_file_id}_*"))
-
-        if not files:
+        if not plist_path:
             return ApiResponse(
                 code=ErrorCode.NOT_FOUND,
                 message="PLIST 文件不存在"
             )
-
-        plist_path = files[0]
 
         # 输出目录
         extract_dir = Path(settings.output_dir) / f"extracted_{request.plist_file_id}"
@@ -171,6 +191,110 @@ async def extract_plist_to_silk(request: PlistExtractRequest):
 
     except Exception as e:
         logger.error(f"PLIST 提取失败: {str(e)}")
+        return ApiResponse(
+            code=ErrorCode.INTERNAL_ERROR,
+            message=str(e)
+        )
+
+
+@router.get("/preview/{file_id}", response_model=ApiResponse)
+async def preview_plist(file_id: str):
+    """预览 PLIST 文件内容"""
+    try:
+        plist_path = find_plist_file(file_id)
+
+        if not plist_path:
+            return ApiResponse(
+                code=ErrorCode.NOT_FOUND,
+                message="PLIST 文件不存在"
+            )
+
+        # 预览内容
+        preview_data = plist_service.preview_plist(plist_path)
+
+        return ApiResponse(
+            code=ErrorCode.SUCCESS,
+            message="预览成功",
+            data={
+                "file_id": file_id,
+                "filename": plist_path.name,
+                **preview_data
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"预览 PLIST 失败: {str(e)}")
+        return ApiResponse(
+            code=ErrorCode.INTERNAL_ERROR,
+            message=str(e)
+        )
+
+
+@router.post("/split", response_model=ApiResponse)
+async def split_plist(request: PlistSplitRequest):
+    """拆分 PLIST 文件"""
+    try:
+        import uuid
+
+        plist_path = find_plist_file(request.plist_file_id)
+
+        if not plist_path:
+            return ApiResponse(
+                code=ErrorCode.NOT_FOUND,
+                message="PLIST 文件不存在"
+            )
+
+        # 创建输出目录
+        split_dir = Path(settings.output_dir) / f"split_{uuid.uuid4().hex}"
+        split_dir.mkdir(parents=True, exist_ok=True)
+
+        # 执行拆分
+        result_files = plist_service.split_plist(
+            plist_path=plist_path,
+            split_count=request.split_count,
+            output_dir=split_dir,
+            output_prefix=request.output_prefix,
+            split_mode=request.split_mode,
+            custom_assignments=request.custom_assignments
+        )
+
+        # 将拆分结果添加到暂存区
+        from app.services.staging_service import StagingService
+        staging = StagingService()
+        file_ids = []
+
+        for file_info in result_files:
+            file_id = uuid.uuid4().hex
+            # 使用标准命名 {file_id}_output.plist，确保暂存区同步和下载端点能匹配
+            actual_file = split_dir / file_info["filename"]
+            renamed_file = split_dir / f"{file_id}_output.plist"
+            actual_file.rename(renamed_file)
+
+            await staging.add_file(
+                file_id=file_id,
+                original_name=file_info["filename"],
+                output_path=renamed_file
+            )
+
+            file_ids.append({
+                "file_id": file_id,
+                "filename": file_info["filename"],
+                "entry_count": file_info["entry_count"],
+                "entries": file_info["keys"]
+            })
+
+        return ApiResponse(
+            code=ErrorCode.SUCCESS,
+            message=f"拆分成功，共生成 {len(result_files)} 个文件",
+            data={
+                "total_entries": sum(f["entry_count"] for f in result_files),
+                "split_count": len(result_files),
+                "files": file_ids
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"PLIST 拆分失败: {str(e)}")
         return ApiResponse(
             code=ErrorCode.INTERNAL_ERROR,
             message=str(e)

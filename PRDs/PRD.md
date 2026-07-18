@@ -1,8 +1,8 @@
 # Silk 音频格式转换 Web 应用 - 产品需求文档
 
-**版本**: v3.3  
+**版本**: v3.4  
 **创建日期**: 2026-03-19  
-**最后更新**: 2026-05-09  
+**最后更新**: 2026-07-08  
 **状态**: ✅ 已完成，可用于开发
 
 ---
@@ -92,9 +92,21 @@
 | SILK → PLIST | 将 SILK 文件转为 Apple XML plist 格式 | P1 |
 | 多文件合并 | 多个 SILK 合并为一个 plist 文件 | P1 |
 | PLIST → SILK | 从 plist 还原为原始 SILK 文件 | P1 |
+| **PLIST 拆分** | 将成品 plist 文件拆分为多个独立 plist 文件，支持自定义拆分数量 | P1 |
 | 格式规范 | `<key>文件名</key><string>base64 内容</string>` | P1 |
 | iOS 兼容 | 符合 iOS NSBundle 资源加载规范 | P1 |
 | 元数据支持 | 可选添加 duration、sampleRate 等元数据 | P2 |
+
+**PLIST 拆分功能详细说明:**
+
+| 功能项 | 详细描述 |
+|--------|----------|
+| 上传 plist | 支持上传已有的成品 plist 文件（来自 iOS 设备导出或其他来源） |
+| 条目预览 | 上传后展示 plist 内包含的所有条目（key 名称、数据大小） |
+| 自定义拆分数量 | 用户可指定拆分为 N 个 plist 文件（1 ≤ N ≤ 条目总数） |
+| 拆分方式 | 均匀分配：将条目平均分配到 N 个文件；手动分配：用户可自定义每个文件包含哪些条目 |
+| 输出命名 | 支持自定义输出文件名前缀，自动添加序号（如 `voices_1.plist`, `voices_2.plist`） |
+| 批量下载 | 拆分后的多个 plist 文件打包为 zip 下载，或逐个加入暂存区 |
 
 #### 2.1.5 暂存区模块
 
@@ -387,6 +399,89 @@ def encode_wechat_silk(input_file, output_file, sample_rate=24000,
 }
 ```
 
+**POST /api/plist/split**
+
+将一个成品 plist 文件拆分为多个独立的 plist 文件。
+
+```json
+请求:
+{
+  "plist_file_id": "uploaded_plist_id",
+  "split_count": 3,
+  "split_mode": "even",
+  "output_prefix": "voices",
+  "custom_assignments": null
+}
+
+参数说明:
+- plist_file_id: 上传的 plist 文件 ID
+- split_count: 拆分数量（1 ≤ N ≤ 条目总数）
+- split_mode: 拆分方式 - "even"（均匀分配）或 "manual"（手动分配）
+- output_prefix: 输出文件名前缀
+- custom_assignments: 手动分配时的条目分配方案（split_mode="manual" 时必填）
+  格式: [{"file_index": 1, "keys": ["voice_001", "voice_002"]}, ...]
+
+响应:
+{
+  "code": 0,
+  "message": "拆分成功",
+  "data": {
+    "total_entries": 10,
+    "split_count": 3,
+    "files": [
+      {
+        "file_id": "split_001",
+        "filename": "voices_1.plist",
+        "entry_count": 4,
+        "entries": ["voice_001", "voice_002", "voice_003", "voice_004"]
+      },
+      {
+        "file_id": "split_002",
+        "filename": "voices_2.plist",
+        "entry_count": 3,
+        "entries": ["voice_005", "voice_006", "voice_007"]
+      },
+      {
+        "file_id": "split_003",
+        "filename": "voices_3.plist",
+        "entry_count": 3,
+        "entries": ["voice_008", "voice_009", "voice_010"]
+      }
+    ],
+    "download_all_url": "/api/download/zip/split_bundle_id"
+  }
+}
+```
+
+**GET /api/plist/preview/{file_id}**
+
+预览 plist 文件内容，返回条目列表（用于拆分前的预览）。
+
+```json
+响应:
+{
+  "code": 0,
+  "message": "预览成功",
+  "data": {
+    "file_id": "plist_file_id",
+    "filename": "voices.plist",
+    "total_entries": 10,
+    "entries": [
+      {
+        "key": "voice_001.silk",
+        "size": 3200,
+        "data_size": 4288
+      },
+      {
+        "key": "voice_002.silk",
+        "size": 5120,
+        "data_size": 6844
+      }
+    ]
+  }
+}
+```
+
 ### 5.6 文件管理接口
 
 **GET /api/staging** - 查看暂存区
@@ -593,6 +688,9 @@ def encode_wechat_silk(input_file, output_file, sample_rate=24000,
 - WAV/MP3 → SILK 编码
 - SILK → WAV/MP3 解码
 - PLIST 转换与还原
+- PLIST 拆分（均匀分配模式）
+- PLIST 拆分（手动分配模式）
+- PLIST 拆分数量边界测试（拆分为 1 个 / 拆分为条目总数）
 - iOS PLIST 格式验证
 - 大文件上传 (接近 50MB 限制)
 - 非法格式文件拒绝
@@ -675,6 +773,8 @@ ffmpeg -f s16le -ar 24000 -ac 1 -i output.pcm output.wav
 - [ ] 上传限制、格式白名单、错误响应语义一致
 - [ ] 部署结构与运行命令描述一致
 - [ ] 版本号与最后更新日期已同步
+- [ ] PLIST 拆分接口参数与响应格式一致
+- [ ] PLIST 预览接口与拆分接口数据结构对齐
 
 ---
 

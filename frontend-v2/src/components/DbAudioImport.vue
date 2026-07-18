@@ -31,9 +31,9 @@
           placeholder="搜索标题..."
           clearable
           class="flex-1"
-          @keyup.enter="search"
+          @keyup.enter="search()"
         />
-        <n-button type="primary" :loading="loading" @click="search">查询</n-button>
+        <n-button type="primary" :loading="loading" @click="search()">查询</n-button>
         <n-button @click="clear">清空</n-button>
       </div>
     </div>
@@ -42,15 +42,34 @@
     <template v-if="searched">
       <div class="flex items-center justify-between">
         <span class="text-xs text-gray-400">共 {{ total }} 条</span>
-        <n-button
-          size="small"
-          type="primary"
-          :disabled="checked.length === 0"
-          :loading="importing"
-          @click="doImport"
-        >
-          导入 ({{ checked.length }})
-        </n-button>
+        <div class="flex items-center gap-2">
+          <n-button
+            size="small"
+            secondary
+            :disabled="records.length === 0"
+            @click="toggleCheckCurrentPage"
+          >
+            {{ isCurrentPageAllChecked ? '取消全选本页' : '全选本页' }}
+          </n-button>
+          <n-button
+            size="small"
+            secondary
+            :disabled="total === 0"
+            :loading="selectingAllQuery"
+            @click="toggleCheckAllQueryResults"
+          >
+            {{ isAllQuerySelected ? '取消全选查询结果' : '全选查询结果' }}
+          </n-button>
+          <n-button
+            size="small"
+            type="primary"
+            :disabled="checked.length === 0"
+            :loading="importing"
+            @click="doImport"
+          >
+            导入 ({{ checked.length }})
+          </n-button>
+        </div>
       </div>
 
       <n-empty v-if="records.length === 0 && !loading" description="无匹配记录" size="small" />
@@ -118,13 +137,14 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   NDatePicker, NInput, NButton, NSelect, NCheckbox, NTag, NEmpty, NPagination,
   useMessage, useDialog
 } from 'naive-ui'
 import type { DbAudioRecord } from '@/types'
 import { queryDbAudio, importDbAudio, getAdminStatus, deleteDbAudioRecord, updateDbAudioTitle } from '@/api/convert'
+import { resolveApiBaseUrl } from '@/api/client'
 import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
@@ -152,6 +172,16 @@ const total = ref(0)
 const page = ref(1)
 const perPage = 20
 const checked = ref<string[]>([])
+const selectingAllQuery = ref(false)
+
+const currentPageIds = computed(() => records.value.map((r) => r.audio_id))
+const currentPageSelectedCount = computed(() =>
+  currentPageIds.value.filter((id) => checked.value.includes(id)).length
+)
+const isCurrentPageAllChecked = computed(() =>
+  records.value.length > 0 && currentPageSelectedCount.value === records.value.length
+)
+const isAllQuerySelected = computed(() => total.value > 0 && checked.value.length === total.value)
 
 const audioRef = ref<HTMLAudioElement | null>(null)
 const playingId = ref<string | null>(null)
@@ -166,6 +196,7 @@ function onSourceChange() {
   records.value = []
   total.value = 0
   checked.value = []
+  selectingAllQuery.value = false
   page.value = 1
   store.saveDbAudioQueryCache({
     source: source.value,
@@ -213,16 +244,83 @@ function toggleCheck(id: string) {
   const i = checked.value.indexOf(id)
   if (i > -1) checked.value.splice(i, 1)
   else checked.value.push(id)
+  syncCache()
 }
 
-async function search() {
+function toggleCheckCurrentPage() {
+  if (currentPageIds.value.length === 0) return
+
+  if (isCurrentPageAllChecked.value) {
+    const pageSet = new Set(currentPageIds.value)
+    checked.value = checked.value.filter((id) => !pageSet.has(id))
+  } else {
+    const merged = new Set(checked.value)
+    currentPageIds.value.forEach((id) => merged.add(id))
+    checked.value = Array.from(merged)
+  }
+
+  syncCache()
+}
+
+async function fetchAllQueryIds() {
+  if (!dateRange.value || dateRange.value.length !== 2) {
+    return [] as string[]
+  }
+
+  const pageSize = 100
+  const pages = Math.max(1, Math.ceil(total.value / pageSize))
+  const ids = new Set<string>()
+
+  for (let p = 1; p <= pages; p++) {
+    const r = await queryDbAudio({
+      source: source.value,
+      date_start: dateRange.value[0],
+      date_end: dateRange.value[1],
+      keyword: keyword.value || undefined,
+      page: p,
+      per_page: pageSize
+    })
+
+    r.data?.records.forEach((row) => ids.add(row.audio_id))
+  }
+
+  return Array.from(ids)
+}
+
+async function toggleCheckAllQueryResults() {
+  if (total.value === 0) return
+
+  if (isAllQuerySelected.value) {
+    checked.value = []
+    syncCache()
+    return
+  }
+
+  selectingAllQuery.value = true
+  try {
+    const ids = await fetchAllQueryIds()
+    const merged = new Set(checked.value)
+    ids.forEach((id) => merged.add(id))
+    checked.value = Array.from(merged)
+    syncCache()
+  } catch {
+    message.error('全选查询结果失败')
+  } finally {
+    selectingAllQuery.value = false
+  }
+}
+
+async function search(resetSelection = true) {
   if (!dateRange.value || dateRange.value.length !== 2) {
     message.warning('请选择时间范围')
     return
   }
   loading.value = true
   searched.value = true
-  checked.value = []
+  if (resetSelection) {
+    checked.value = []
+    selectingAllQuery.value = false
+  }
   try {
     const r = await queryDbAudio({
       source: source.value,
@@ -256,7 +354,7 @@ function clear() {
   store.clearDbAudioQueryCache()
 }
 
-function onPage(p: number) { page.value = p; search() }
+function onPage(p: number) { page.value = p; search(false) }
 
 async function doImport() {
   if (!checked.value.length) return
@@ -281,7 +379,9 @@ function isPlayable(fmt: string) { return ['WAV', 'MP3', 'M4A'].includes(fmt?.to
 function togglePlay(row: DbAudioRecord) {
   const a = audioRef.value; if (!a) return
   if (playingId.value === row.audio_id) { a.pause(); playingId.value = null; return }
-  a.src = `/api/db-audio/preview/${row.audio_id}?source=${source.value}`
+  const baseUrl = resolveApiBaseUrl()
+  const previewPath = `/api/db-audio/preview/${encodeURIComponent(row.audio_id)}?source=${encodeURIComponent(source.value)}`
+  a.src = baseUrl ? `${baseUrl}${previewPath}` : previewPath
   a.play().catch(() => message.warning('无法播放'))
   playingId.value = row.audio_id
 }

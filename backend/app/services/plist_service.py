@@ -13,6 +13,140 @@ class PlistService:
     """PLIST 格式转换服务"""
 
     @staticmethod
+    def preview_plist(plist_path: Path) -> Dict:
+        """
+        预览 PLIST 文件内容
+
+        Args:
+            plist_path: PLIST 文件路径
+
+        Returns:
+            包含条目信息的字典
+        """
+        try:
+            with open(plist_path, 'rb') as f:
+                plist_data = plistlib.load(f)
+
+            entries = []
+            for key, value in plist_data.items():
+                if isinstance(value, str):
+                    # 计算 base64 解码后的实际大小
+                    try:
+                        decoded_size = len(base64.b64decode(value))
+                    except Exception:
+                        decoded_size = 0
+
+                    entries.append({
+                        "key": key,
+                        "data_size": len(value),
+                        "decoded_size": decoded_size
+                    })
+
+            return {
+                "total_entries": len(entries),
+                "entries": entries
+            }
+
+        except Exception as e:
+            logger.error(f"预览 PLIST 失败: {str(e)}")
+            raise
+
+    @staticmethod
+    def split_plist(
+        plist_path: Path,
+        split_count: int,
+        output_dir: Path,
+        output_prefix: str = "split",
+        split_mode: str = "even",
+        custom_assignments: Optional[List[Dict]] = None
+    ) -> List[Dict]:
+        """
+        将 PLIST 文件拆分为多个独立的 PLIST 文件
+
+        Args:
+            plist_path: 源 PLIST 文件路径
+            split_count: 拆分数量
+            output_dir: 输出目录
+            output_prefix: 输出文件名前缀
+            split_mode: 拆分方式 - "even"（均匀分配）或 "manual"（手动分配）
+            custom_assignments: 手动分配方案
+
+        Returns:
+            拆分结果列表
+        """
+        try:
+            # 读取源 PLIST
+            with open(plist_path, 'rb') as f:
+                plist_data = plistlib.load(f)
+
+            all_keys = list(plist_data.keys())
+            total_entries = len(all_keys)
+
+            # 验证拆分数量
+            if split_count < 1 or split_count > total_entries:
+                raise ValueError(f"拆分数量必须在 1 到 {total_entries} 之间")
+
+            # 创建输出目录
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            # 根据拆分方式分配条目
+            if split_mode == "even":
+                # 均匀分配
+                assignments = []
+                base_count = total_entries // split_count
+                remainder = total_entries % split_count
+
+                start_idx = 0
+                for i in range(split_count):
+                    count = base_count + (1 if i < remainder else 0)
+                    assignments.append({
+                        "file_index": i + 1,
+                        "keys": all_keys[start_idx:start_idx + count]
+                    })
+                    start_idx += count
+            else:
+                # 手动分配
+                if not custom_assignments:
+                    raise ValueError("手动分配模式需要提供 custom_assignments")
+                assignments = custom_assignments
+
+            # 执行拆分
+            result_files = []
+            for assignment in assignments:
+                file_index = assignment["file_index"]
+                keys = assignment["keys"]
+
+                # 构建子 PLIST 数据
+                sub_plist_data = {}
+                for key in keys:
+                    if key in plist_data:
+                        sub_plist_data[key] = plist_data[key]
+                    else:
+                        logger.warning(f"条目不存在: {key}")
+
+                # 生成输出文件
+                output_filename = f"{output_prefix}_{file_index}.plist"
+                output_path = output_dir / output_filename
+
+                with open(output_path, 'wb') as f:
+                    plistlib.dump(sub_plist_data, f, fmt=plistlib.FMT_XML)
+
+                result_files.append({
+                    "file_index": file_index,
+                    "filename": output_filename,
+                    "entry_count": len(sub_plist_data),
+                    "keys": list(sub_plist_data.keys())
+                })
+
+                logger.info(f"拆分生成: {output_filename} ({len(sub_plist_data)} 个条目)")
+
+            return result_files
+
+        except Exception as e:
+            logger.error(f"PLIST 拆分失败: {str(e)}")
+            raise
+
+    @staticmethod
     def silk_to_plist(
         silk_path: Path,
         output_path: Path,

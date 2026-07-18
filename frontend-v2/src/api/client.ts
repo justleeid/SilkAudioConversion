@@ -1,7 +1,24 @@
 import axios from 'axios'
 
+export function resolveApiBaseUrl(): string {
+  const envBase = import.meta.env.VITE_API_BASE_URL
+  if (envBase) {
+    return envBase
+  }
+
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname
+    const isLocalDev = host === 'localhost' || host === '127.0.0.1'
+    if (!isLocalDev) {
+      return `${window.location.protocol}//${host}:8000`
+    }
+  }
+
+  return ''
+}
+
 const api = axios.create({
-  baseURL: ''
+  baseURL: resolveApiBaseUrl()
 })
 
 // 全局错误处理

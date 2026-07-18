@@ -1,8 +1,8 @@
 # Silk 音频格式转换 Web 应用 - 技术规范文档
 
-**版本**: v1.2  
+**版本**: v1.3  
 **创建日期**: 2026-03-19  
-**最后更新**: 2026-05-09  
+**最后更新**: 2026-07-08  
 **状态**: ✅ 可用于开发指导
 
 ---
@@ -694,7 +694,437 @@ settings = Settings()
 
 ---
 
-## 7.3 数据库音频导入服务
+## 7.3 PLIST 拆分服务
+
+### 7.3.1 拆分服务实现
+
+```python
+# app/services/plist_service.py (新增方法)
+import plistlib
+from pathlib import Path
+from typing import List, Dict, Optional
+from loguru import logger
+
+class PlistService:
+    """PLIST 格式转换服务"""
+    
+    # ... 现有方法 ...
+    
+    @staticmethod
+    def preview_plist(plist_path: Path) -> Dict:
+        """
+        预览 PLIST 文件内容
+        
+        Args:
+            plist_path: PLIST 文件路径
+            
+        Returns:
+            包含条目信息的字典
+        """
+        try:
+            with open(plist_path, 'rb') as f:
+                plist_data = plistlib.load(f)
+            
+            entries = []
+            for key, value in plist_data.items():
+                if isinstance(value, str):
+                    # 计算 base64 解码后的实际大小
+                    import base64
+                    try:
+                        decoded_size = len(base64.b64decode(value))
+                    except Exception:
+                        decoded_size = 0
+                    
+                    entries.append({
+                        "key": key,
+                        "data_size": len(value),
+                        "decoded_size": decoded_size
+                    })
+            
+            return {
+                "total_entries": len(entries),
+                "entries": entries
+            }
+            
+        except Exception as e:
+            logger.error(f"预览 PLIST 失败: {str(e)}")
+            raise
+    
+    @staticmethod
+    def split_plist(
+        plist_path: Path,
+        split_count: int,
+        output_dir: Path,
+        output_prefix: str = "split",
+        split_mode: str = "even",
+        custom_assignments: Optional[List[Dict]] = None
+    ) -> List[Dict]:
+        """
+        将 PLIST 文件拆分为多个独立的 PLIST 文件
+        
+        Args:
+            plist_path: 源 PLIST 文件路径
+            split_count: 拆分数量
+            output_dir: 输出目录
+            output_prefix: 输出文件名前缀
+            split_mode: 拆分方式 - "even"（均匀分配）或 "manual"（手动分配）
+            custom_assignments: 手动分配方案，格式: [{"file_index": 1, "keys": ["key1", "key2"]}, ...]
+            
+        Returns:
+            拆分结果列表
+        """
+        try:
+            # 读取源 PLIST
+            with open(plist_path, 'rb') as f:
+                plist_data = plistlib.load(f)
+            
+            all_keys = list(plist_data.keys())
+            total_entries = len(all_keys)
+            
+            # 验证拆分数量
+            if split_count < 1 or split_count > total_entries:
+                raise ValueError(f"拆分数量必须在 1 到 {total_entries} 之间")
+            
+            # 创建输出目录
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 根据拆分方式分配条目
+            if split_mode == "even":
+                # 均匀分配
+                assignments = []
+                base_count = total_entries // split_count
+                remainder = total_entries % split_count
+                
+                start_idx = 0
+                for i in range(split_count):
+                    count = base_count + (1 if i < remainder else 0)
+                    assignments.append({
+                        "file_index": i + 1,
+                        "keys": all_keys[start_idx:start_idx + count]
+                    })
+                    start_idx += count
+            else:
+                # 手动分配
+                if not custom_assignments:
+                    raise ValueError("手动分配模式需要提供 custom_assignments")
+                assignments = custom_assignments
+            
+            # 执行拆分
+            result_files = []
+            for assignment in assignments:
+                file_index = assignment["file_index"]
+                keys = assignment["keys"]
+                
+                # 构建子 PLIST 数据
+                sub_plist_data = {}
+                for key in keys:
+                    if key in plist_data:
+                        sub_plist_data[key] = plist_data[key]
+                    else:
+                        logger.warning(f"条目不存在: {key}")
+                
+                # 生成输出文件
+                output_filename = f"{output_prefix}_{file_index}.plist"
+                output_path = output_dir / output_filename
+                
+                with open(output_path, 'wb') as f:
+                    plistlib.dump(sub_plist_data, f, fmt=plistlib.FMT_XML)
+                
+                result_files.append({
+                    "file_index": file_index,
+                    "filename": output_filename,
+                    "entry_count": len(sub_plist_data),
+                    "keys": list(sub_plist_data.keys())
+                })
+                
+                logger.info(f"拆分生成: {output_filename} ({len(sub_plist_data)} 个条目)")
+            
+            return result_files
+            
+        except Exception as e:
+            logger.error(f"PLIST 拆分失败: {str(e)}")
+            raise
+```
+
+### 7.3.2 PLIST 拆分 API 端点
+
+```python
+# app/api/plist.py (新增端点)
+from fastapi import APIRouter
+from pydantic import BaseModel
+from typing import List, Optional, Dict
+from app.models.response import ApiResponse, ErrorCode
+from app.services.plist_service import PlistService
+from app.services.staging_service import StagingService
+from app.config import settings
+from app.logger import logger
+from pathlib import Path
+import uuid
+import zipfile
+import io
+
+router = APIRouter(prefix="/api/plist", tags=["plist"])
+
+plist_service = PlistService()
+
+# ... 现有端点 ...
+
+class PlistPreviewRequest(BaseModel):
+    """PLIST 预览请求"""
+    plist_file_id: str
+
+class PlistSplitRequest(BaseModel):
+    """PLIST 拆分请求"""
+    plist_file_id: str
+    split_count: int
+    split_mode: str = "even"  # "even" 或 "manual"
+    output_prefix: str = "split"
+    custom_assignments: Optional[List[Dict]] = None
+
+@router.get("/preview/{file_id}", response_model=ApiResponse)
+async def preview_plist(file_id: str):
+    """预览 PLIST 文件内容"""
+    try:
+        # 查找 PLIST 文件
+        output_path = Path(settings.output_dir)
+        upload_path = Path(settings.upload_dir)
+        
+        files = list(output_path.glob(f"{file_id}_*"))
+        if not files:
+            files = list(upload_path.glob(f"{file_id}_*"))
+        
+        if not files:
+            return ApiResponse(
+                code=ErrorCode.NOT_FOUND,
+                message="PLIST 文件不存在"
+            )
+        
+        plist_path = files[0]
+        
+        # 预览内容
+        preview_data = plist_service.preview_plist(plist_path)
+        
+        return ApiResponse(
+            code=ErrorCode.SUCCESS,
+            message="预览成功",
+            data={
+                "file_id": file_id,
+                "filename": plist_path.name,
+                **preview_data
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"预览 PLIST 失败: {str(e)}")
+        return ApiResponse(
+            code=ErrorCode.INTERNAL_ERROR,
+            message=str(e)
+        )
+
+@router.post("/split", response_model=ApiResponse)
+async def split_plist(request: PlistSplitRequest):
+    """拆分 PLIST 文件"""
+    try:
+        # 查找 PLIST 文件
+        output_path = Path(settings.output_dir)
+        upload_path = Path(settings.upload_dir)
+        
+        files = list(output_path.glob(f"{request.plist_file_id}_*"))
+        if not files:
+            files = list(upload_path.glob(f"{request.plist_file_id}_*"))
+        
+        if not files:
+            return ApiResponse(
+                code=ErrorCode.NOT_FOUND,
+                message="PLIST 文件不存在"
+            )
+        
+        plist_path = files[0]
+        
+        # 创建输出目录
+        split_dir = Path(settings.output_dir) / f"split_{uuid.uuid4().hex}"
+        split_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 执行拆分
+        result_files = plist_service.split_plist(
+            plist_path=plist_path,
+            split_count=request.split_count,
+            output_dir=split_dir,
+            output_prefix=request.output_prefix,
+            split_mode=request.split_mode,
+            custom_assignments=request.custom_assignments
+        )
+        
+        # 将拆分结果添加到暂存区
+        staging = StagingService()
+        file_ids = []
+        
+        for file_info in result_files:
+            file_id = uuid.uuid4().hex
+            output_file = split_dir / file_info["filename"]
+            
+            await staging.add_file(
+                file_id=file_id,
+                original_name=file_info["filename"],
+                output_path=output_file
+            )
+            
+            file_ids.append({
+                "file_id": file_id,
+                "filename": file_info["filename"],
+                "entry_count": file_info["entry_count"],
+                "entries": file_info["keys"]
+            })
+        
+        return ApiResponse(
+            code=ErrorCode.SUCCESS,
+            message=f"拆分成功，共生成 {len(result_files)} 个文件",
+            data={
+                "total_entries": sum(f["entry_count"] for f in result_files),
+                "split_count": len(result_files),
+                "files": file_ids
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"PLIST 拆分失败: {str(e)}")
+        return ApiResponse(
+            code=ErrorCode.INTERNAL_ERROR,
+            message=str(e)
+        )
+```
+
+### 7.3.3 前端 API 调用
+
+```typescript
+// src/api/convert.ts (新增方法)
+export const plistApi = {
+  // ... 现有方法 ...
+  
+  preview: (fileId: string) =>
+    api.get<never, ApiResponse>(`/api/plist/preview/${fileId}`),
+  
+  split: (params: {
+    plist_file_id: string
+    split_count: number
+    split_mode: 'even' | 'manual'
+    output_prefix?: string
+    custom_assignments?: Array<{
+      file_index: number
+      keys: string[]
+    }>
+  }) =>
+    api.post<typeof params, ApiResponse>('/api/plist/split', params)
+}
+```
+
+### 7.3.4 测试用例
+
+```python
+# tests/test_plist_split.py
+import pytest
+from pathlib import Path
+from app.services.plist_service import PlistService
+
+@pytest.fixture
+def sample_plist(tmp_path):
+    """创建测试用 PLIST 文件"""
+    import plistlib
+    
+    data = {
+        "voice_001": "base64data1",
+        "voice_002": "base64data2",
+        "voice_003": "base64data3",
+        "voice_004": "base64data4",
+        "voice_005": "base64data5"
+    }
+    
+    plist_path = tmp_path / "test.plist"
+    with open(plist_path, 'wb') as f:
+        plistlib.dump(data, f, fmt=plistlib.FMT_XML)
+    
+    return plist_path
+
+def test_preview_plist(sample_plist):
+    """测试预览 PLIST 文件"""
+    service = PlistService()
+    result = service.preview_plist(sample_plist)
+    
+    assert result["total_entries"] == 5
+    assert len(result["entries"]) == 5
+    assert result["entries"][0]["key"] == "voice_001"
+
+def test_split_even(sample_plist, tmp_path):
+    """测试均匀拆分"""
+    service = PlistService()
+    output_dir = tmp_path / "output"
+    
+    result = service.split_plist(
+        plist_path=sample_plist,
+        split_count=2,
+        output_dir=output_dir,
+        split_mode="even"
+    )
+    
+    assert len(result) == 2
+    # 5 个条目分 2 份：3 + 2
+    assert result[0]["entry_count"] == 3
+    assert result[1]["entry_count"] == 2
+
+def test_split_manual(sample_plist, tmp_path):
+    """测试手动拆分"""
+    service = PlistService()
+    output_dir = tmp_path / "output"
+    
+    custom_assignments = [
+        {"file_index": 1, "keys": ["voice_001", "voice_002"]},
+        {"file_index": 2, "keys": ["voice_003", "voice_004", "voice_005"]}
+    ]
+    
+    result = service.split_plist(
+        plist_path=sample_plist,
+        split_count=2,
+        output_dir=output_dir,
+        split_mode="manual",
+        custom_assignments=custom_assignments
+    )
+    
+    assert len(result) == 2
+    assert result[0]["entry_count"] == 2
+    assert result[1]["entry_count"] == 3
+
+def test_split_boundary(sample_plist, tmp_path):
+    """测试边界情况：拆分为 1 个文件"""
+    service = PlistService()
+    output_dir = tmp_path / "output"
+    
+    result = service.split_plist(
+        plist_path=sample_plist,
+        split_count=1,
+        output_dir=output_dir,
+        split_mode="even"
+    )
+    
+    assert len(result) == 1
+    assert result[0]["entry_count"] == 5
+
+def test_split_invalid_count(sample_plist, tmp_path):
+    """测试无效拆分数量"""
+    service = PlistService()
+    output_dir = tmp_path / "output"
+    
+    with pytest.raises(ValueError, match="拆分数量必须在"):
+        service.split_plist(
+            plist_path=sample_plist,
+            split_count=10,  # 超过条目总数
+            output_dir=output_dir,
+            split_mode="even"
+        )
+```
+
+---
+
+## 7.4 数据库音频导入服务
 
 ### 7.3.1 数据库连接与查询
 

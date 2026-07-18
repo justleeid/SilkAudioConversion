@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { FileInfo, TaskInfo, ConvertParams } from '@/types'
-import { upload, convert, queryStatus } from '@/api/convert'
+import { upload, convert, queryStatus, previewPlist, splitPlist } from '@/api/convert'
+import type { PlistPreviewData, PlistSplitParams } from '@/api/convert'
 import { TaskStatus } from '@/types'
 
 export interface DbAudioQueryCache {
@@ -16,6 +17,8 @@ export interface DbAudioQueryCache {
   checked: string[]
 }
 
+export type PlistMode = 'merge' | 'split'
+
 export const useAppStore = defineStore('app', () => {
   const files = ref<FileInfo[]>([])
   const tasks = ref<Map<string, TaskInfo>>(new Map())
@@ -23,6 +26,15 @@ export const useAppStore = defineStore('app', () => {
   const converting = ref(false)
   const selectedForPlist = ref<Set<string>>(new Set())
   const dbAudioQueryCache = ref<DbAudioQueryCache | null>(null)
+
+  // PLIST 拆分相关状态
+  const plistMode = ref<PlistMode>('merge')
+  const selectedPlistFileId = ref<string | null>(null)
+  const splitPreviewData = ref<PlistPreviewData | null>(null)
+  const splitCount = ref(2)
+  const splitMode = ref<'even' | 'manual'>('even')
+  const outputPrefix = ref('split')
+  const splitLoading = ref(false)
 
   const hasFiles = computed(() => files.value.length > 0)
 
@@ -128,6 +140,66 @@ export const useAppStore = defineStore('app', () => {
     selectedForPlist.value.clear()
   }
 
+  // PLIST 拆分相关方法
+  function setPlistMode(mode: PlistMode) {
+    plistMode.value = mode
+  }
+
+  async function loadPlistPreview(fileId: string) {
+    splitLoading.value = true
+    try {
+      const response = await previewPlist(fileId)
+      if (response.code === 0 && response.data) {
+        splitPreviewData.value = response.data
+        selectedPlistFileId.value = fileId
+        // 重置拆分设置
+        splitCount.value = 2
+        splitMode.value = 'even'
+        outputPrefix.value = 'split'
+        return true
+      }
+      return false
+    } catch {
+      return false
+    } finally {
+      splitLoading.value = false
+    }
+  }
+
+  async function executePlistSplit(): Promise<boolean> {
+    if (!selectedPlistFileId.value || !splitPreviewData.value) return false
+
+    splitLoading.value = true
+    try {
+      const params: PlistSplitParams = {
+        plist_file_id: selectedPlistFileId.value,
+        split_count: splitCount.value,
+        split_mode: splitMode.value,
+        output_prefix: outputPrefix.value
+      }
+
+      const response = await splitPlist(params)
+      if (response.code === 0 && response.data) {
+        // 清理拆分状态
+        clearSplitState()
+        return true
+      }
+      return false
+    } catch {
+      return false
+    } finally {
+      splitLoading.value = false
+    }
+  }
+
+  function clearSplitState() {
+    selectedPlistFileId.value = null
+    splitPreviewData.value = null
+    splitCount.value = 2
+    splitMode.value = 'even'
+    outputPrefix.value = 'split'
+  }
+
   function saveDbAudioQueryCache(cache: DbAudioQueryCache) {
     dbAudioQueryCache.value = {
       ...cache,
@@ -148,9 +220,13 @@ export const useAppStore = defineStore('app', () => {
   return {
     files, tasks, uploading, converting, selectedForPlist, stagingVersion,
     dbAudioQueryCache,
+    // PLIST 拆分状态
+    plistMode, selectedPlistFileId, splitPreviewData, splitCount, splitMode, outputPrefix, splitLoading,
     hasFiles, completedTasks, activeTasks,
     uploadFiles, startConversion, removeFile, clearCompletedTasks,
     reset, togglePlistSelection, clearPlistSelection,
+    // PLIST 拆分方法
+    setPlistMode, loadPlistPreview, executePlistSplit, clearSplitState,
     triggerStagingRefresh,
     saveDbAudioQueryCache, clearDbAudioQueryCache
   }

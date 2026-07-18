@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     upload_dir: str = "./uploads"
     temp_dir: str = "./temp"
     output_dir: str = "./output"
-    max_file_size: int = 52428800  # 50 MB
+    max_file_size: int = 209715200  # 50 MB
     max_file_count: int = 50
 
     # SILK 工具路径

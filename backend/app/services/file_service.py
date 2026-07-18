@@ -27,19 +27,23 @@ def detect_file_type(content: bytes) -> str:
         return 'audio/amr'
     elif len(content) >= 12 and content[4:8] == b'ftyp':
         return 'audio/mp4'
+    # 检测 XML/PLIST 文件
+    elif content[:100].lstrip().startswith(b'<?xml') or content[:100].lstrip().startswith(b'<!DOCTYPE'):
+        return 'application/xml'
     return 'application/octet-stream'
 
 
 class FileService:
     """文件上传处理服务"""
 
-    ALLOWED_EXTENSIONS = {'.silk', '.wav', '.mp3', '.amr', '.m4a'}
+    ALLOWED_EXTENSIONS = {'.silk', '.wav', '.mp3', '.amr', '.m4a', '.plist'}
     ALLOWED_MIME_TYPES = {
         'audio/x-silk', 'audio/silk',
         'audio/wav', 'audio/x-wav', 'audio/wave',
         'audio/mpeg', 'audio/mp3',
-        'audio/amr', 'audio/x-amr'
-        , 'audio/mp4', 'audio/m4a', 'audio/x-m4a'
+        'audio/amr', 'audio/x-amr',
+        'audio/mp4', 'audio/m4a', 'audio/x-m4a',
+        'application/xml', 'text/xml', 'application/octet-stream'  # plist 文件
     }
 
     def __init__(self):
