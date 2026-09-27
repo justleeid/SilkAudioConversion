@@ -27,6 +27,10 @@ class ConvertService:
         # 任务存储（内存中，后续可改为 Redis）
         self.tasks: Dict[str, TaskInfo] = {}
 
+        # 后台转换任务的强引用集合：事件循环只持有弱引用，
+        # 不保存的话运行中的任务可能被垃圾回收
+        self._running_tasks: set = set()
+
         # 并发控制
         self.semaphore = asyncio.Semaphore(settings.max_concurrent_tasks)
 
@@ -94,9 +98,12 @@ class ConvertService:
 
             task_info = self.tasks[task_id]
 
-            # 更新任务状态
-            task_info.status = TaskStatus.PROCESSING
-            task_info.progress = 0
+            # 防重入：正在转换中的任务拒绝重复提交
+            if task_info.status == TaskStatus.PROCESSING:
+                return ApiResponse(
+                    code=ErrorCode.BAD_REQUEST,
+                    message="任务正在转换中，请勿重复提交"
+                )
 
             # 查找上传的文件
             upload_files = list(self.file_service.upload_dir.glob(f"{task_id}_*"))
@@ -108,14 +115,20 @@ class ConvertService:
 
             input_file = upload_files[0]
 
-            # 在后台执行转换
-            asyncio.create_task(
+            # 校验全部通过后再更新任务状态，避免失败路径留下脏状态
+            task_info.status = TaskStatus.PROCESSING
+            task_info.progress = 0
+
+            # 在后台执行转换（保存强引用防止被 GC，完成后自动移除）
+            conversion_task = asyncio.create_task(
                 self._execute_conversion(
                     task_id,
                     input_file,
                     request
                 )
             )
+            self._running_tasks.add(conversion_task)
+            conversion_task.add_done_callback(self._on_conversion_done)
 
             return ApiResponse(
                 code=ErrorCode.SUCCESS,
@@ -129,6 +142,14 @@ class ConvertService:
                 code=ErrorCode.INTERNAL_ERROR,
                 message=str(e)
             )
+
+    def _on_conversion_done(self, task: asyncio.Task) -> None:
+        """转换任务完成回调：移除强引用，兜底记录未捕获异常"""
+        self._running_tasks.discard(task)
+        if not task.cancelled():
+            exc = task.exception()
+            if exc:
+                logger.error(f"转换任务异常退出: {exc}")
 
     async def _execute_conversion(
         self,
