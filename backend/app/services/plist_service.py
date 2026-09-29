@@ -7,6 +7,7 @@ import plistlib
 from pathlib import Path
 from typing import List, Dict, Optional
 from app.logger import logger
+from app.utils.path_security import sanitize_filename
 
 
 class PlistService:
@@ -258,7 +259,9 @@ class PlistService:
                     logger.warning(f"跳过无效 base64: {key}")
                     continue
 
-                silk_path = output_dir / key
+                # key 来自外部 plist 内容，必须消毒后再拼路径，防止目录穿越
+                safe_key = sanitize_filename(key)
+                silk_path = output_dir / safe_key
                 with open(silk_path, 'wb') as f:
                     f.write(silk_data)
 
