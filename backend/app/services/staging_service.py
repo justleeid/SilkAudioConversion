@@ -61,10 +61,18 @@ class StagingService:
             logger.info("暂存区后台清理任务已启动")
 
     async def _cleanup_loop(self):
-        """后台清理循环"""
+        """后台清理循环（任何单轮异常都不能让循环退出）"""
         while True:
-            await asyncio.sleep(self.cleanup_interval)
-            await self.cleanup_expired()
+            try:
+                await asyncio.sleep(self.cleanup_interval)
+                # 先把磁盘上的文件同步进内存元数据，
+                # 避免重启后内存为空导致清理空跑
+                self._sync_metadata_with_disk()
+                await self.cleanup_expired()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(f"暂存区后台清理异常（下一轮继续）: {str(e)}")
 
     def _save_metadata(self):
         """将内存元数据持久化到磁盘 JSON 文件"""
@@ -396,8 +404,13 @@ class StagingService:
         expired_ids = []
 
         for file_id, data in self._metadata.items():
-            expires_at = datetime.fromisoformat(data['expires_at'])
-            if now > expires_at:
+            try:
+                expires_at = datetime.fromisoformat(data['expires_at'])
+            except (KeyError, TypeError, ValueError):
+                # 元数据损坏时按过期处理，让 delete_file 连同脏记录一起清掉（自愈）
+                logger.warning(f"暂存文件元数据损坏，按过期清理: {file_id}")
+                expires_at = None
+            if expires_at is None or now > expires_at:
                 expired_ids.append(file_id)
 
         for file_id in expired_ids:
