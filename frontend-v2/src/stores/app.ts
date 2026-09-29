@@ -88,9 +88,12 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function pollTaskStatus(taskId: string) {
+    const MAX_RETRIES = 10
+    let retries = 0
     const poll = async () => {
       try {
         const response = await queryStatus(taskId)
+        retries = 0
         if (response.data) {
           tasks.value.set(taskId, response.data)
           const status = response.data.status
@@ -99,7 +102,21 @@ export const useAppStore = defineStore('app', () => {
           }
         }
       } catch {
-        // continue polling on transient errors
+        // 瞬时错误（网络抖动/后端短暂不可用）：继续轮询，超过上限后放弃并标记失败，
+        // 避免任务永远停留在 processing
+        retries += 1
+        if (retries <= MAX_RETRIES) {
+          setTimeout(poll, 1000 * Math.min(retries, 5))
+          return
+        }
+        const task = tasks.value.get(taskId)
+        if (task && (task.status === TaskStatus.PENDING || task.status === TaskStatus.PROCESSING)) {
+          tasks.value.set(taskId, {
+            ...task,
+            status: TaskStatus.FAILED,
+            error_message: '状态查询失败，请检查后端服务后重试'
+          })
+        }
       }
     }
     await poll()
