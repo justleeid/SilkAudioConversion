@@ -3,6 +3,7 @@
 参考 development.md 第 7.3.1 节、PRD.md 第 2.1.8 节
 """
 from abc import ABC, abstractmethod
+import asyncio
 from typing import Optional
 import mysql.connector
 from app.config import settings
@@ -71,6 +72,19 @@ class BaseDatabaseAudioService(ABC):
         page: int = 1,
         per_page: int = 20
     ) -> dict:
+        # 同步驱动（mysql-connector/pyodbc）会阻塞事件循环，放到线程池执行
+        return await asyncio.to_thread(
+            self._query_audio_records_sync, date_start, date_end, keyword, page, per_page
+        )
+
+    def _query_audio_records_sync(
+        self,
+        date_start: str,
+        date_end: str,
+        keyword: Optional[str],
+        page: int,
+        per_page: int
+    ) -> dict:
         conn = self._get_connection()
         cursor = conn.cursor()
         try:
@@ -102,6 +116,9 @@ class BaseDatabaseAudioService(ABC):
             conn.close()
 
     async def get_audio_blob(self, audio_id: str) -> bytes:
+        return await asyncio.to_thread(self._get_audio_blob_sync, audio_id)
+
+    def _get_audio_blob_sync(self, audio_id: str) -> bytes:
         conn = self._get_connection()
         cursor = conn.cursor()
         try:
@@ -117,6 +134,9 @@ class BaseDatabaseAudioService(ABC):
             conn.close()
 
     async def get_audio_records_batch(self, audio_ids: list[str]) -> list[dict]:
+        return await asyncio.to_thread(self._get_audio_records_batch_sync, audio_ids)
+
+    def _get_audio_records_batch_sync(self, audio_ids: list[str]) -> list[dict]:
         conn = self._get_connection()
         cursor = conn.cursor()
         try:
@@ -141,6 +161,9 @@ class BaseDatabaseAudioService(ABC):
 
 
     async def delete_audio_record(self, audio_id: str) -> int:
+        return await asyncio.to_thread(self._delete_audio_record_sync, audio_id)
+
+    def _delete_audio_record_sync(self, audio_id: str) -> int:
         conn = self._get_connection()
         cursor = conn.cursor()
         try:
@@ -156,6 +179,9 @@ class BaseDatabaseAudioService(ABC):
             conn.close()
 
     async def update_audio_title(self, audio_id: str, title: str) -> int:
+        return await asyncio.to_thread(self._update_audio_title_sync, audio_id, title)
+
+    def _update_audio_title_sync(self, audio_id: str, title: str) -> int:
         conn = self._get_connection()
         cursor = conn.cursor()
         try:
