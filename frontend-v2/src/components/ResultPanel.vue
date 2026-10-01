@@ -50,11 +50,19 @@
 
     <!-- Staging area -->
     <div class="space-y-2">
-      <div class="flex items-center justify-between">
-        <span class="text-xs text-gray-400">
+      <div class="flex items-center justify-between gap-2">
+        <span class="text-xs text-gray-400 shrink-0">
           暂存区 · {{ stats?.file_count ?? 0 }} 个文件 · {{ formatSize(stats?.total_size ?? 0) }}
         </span>
-        <div class="flex gap-1">
+        <div class="flex gap-1 items-center">
+          <n-select
+            v-if="files.length > 0"
+            v-model:value="sortBy"
+            :options="sortOptions"
+            size="tiny"
+            class="w-28"
+            :consistent-menu-width="false"
+          />
           <n-button size="tiny" quaternary @click="refresh">
             <template #icon><span>🔄</span></template>
           </n-button>
@@ -90,7 +98,7 @@
         <!-- File rows -->
         <div class="space-y-1">
           <div
-            v-for="f in files"
+            v-for="f in sortedFiles"
             :key="f.file_id"
             class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white dark:bg-[#1e1e22] border border-gray-100 dark:border-gray-800 group"
           >
@@ -148,7 +156,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import {
-  NButton, NCheckbox, NInput, NProgress, NDivider,
+  NButton, NCheckbox, NInput, NProgress, NDivider, NSelect,
   useMessage, useDialog
 } from 'naive-ui'
 import { useAppStore } from '@/stores/app'
@@ -169,9 +177,37 @@ const checkedIds = ref<string[]>([])
 const renamingId = ref<string | null>(null)
 const renameValue = ref('')
 
+// -- Sorting --
+type SortBy = 'default' | 'time_desc' | 'time_asc' | 'size_desc' | 'size_asc'
+const sortBy = ref<SortBy>('default')
+
+const sortOptions: Array<{ label: string; value: SortBy }> = [
+  { label: '默认排序', value: 'default' },
+  { label: '时间 新→旧', value: 'time_desc' },
+  { label: '时间 旧→新', value: 'time_asc' },
+  { label: '大小 大→小', value: 'size_desc' },
+  { label: '大小 小→大', value: 'size_asc' },
+]
+
+const sortedFiles = computed(() => {
+  const arr = [...files.value]
+  switch (sortBy.value) {
+    case 'time_desc':
+      return arr.sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at))
+    case 'time_asc':
+      return arr.sort((a, b) => +new Date(a.created_at) - +new Date(b.created_at))
+    case 'size_desc':
+      return arr.sort((a, b) => b.size - a.size)
+    case 'size_asc':
+      return arr.sort((a, b) => a.size - b.size)
+    default:
+      return arr
+  }
+})
+
 // -- Select-all computed --
-const allChecked = computed(() => files.value.length > 0 && checkedIds.value.length === files.value.length)
-const indeterminate = computed(() => checkedIds.value.length > 0 && checkedIds.value.length < files.value.length)
+const allChecked = computed(() => sortedFiles.value.length > 0 && checkedIds.value.length === sortedFiles.value.length)
+const indeterminate = computed(() => checkedIds.value.length > 0 && checkedIds.value.length < sortedFiles.value.length)
 
 function toggleCheck(id: string) {
   const i = checkedIds.value.indexOf(id)
@@ -180,7 +216,7 @@ function toggleCheck(id: string) {
 }
 
 function toggleSelectAll(val: boolean) {
-  checkedIds.value = val ? files.value.map((f) => f.file_id) : []
+  checkedIds.value = val ? sortedFiles.value.map((f) => f.file_id) : []
 }
 
 // -- Task helpers --
