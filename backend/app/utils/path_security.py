@@ -2,6 +2,7 @@
 路径安全工具
 参考 development.md 第 6.2 节
 """
+import uuid
 from pathlib import Path
 from app.logger import logger
 
@@ -58,7 +59,6 @@ def sanitize_filename(filename: str) -> str:
 
     # 如果文件名为空，生成一个随机名称
     if not safe_name:
-        import uuid
         safe_name = f"file_{uuid.uuid4().hex}"
         logger.warning(f"文件名为空，生成随机名称: {safe_name}")
 

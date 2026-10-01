@@ -7,6 +7,12 @@ from typing import List
 from app.models.convert import ConvertRequest
 from app.models.response import ApiResponse
 from app.services.convert_service import ConvertService
+import os
+from pathlib import Path
+from fastapi.responses import FileResponse
+from app.config import settings
+from app.models.response import ApiResponse, ErrorCode
+from app.services.staging_service import StagingService
 
 router = APIRouter(prefix="/api", tags=["convert"])
 
@@ -68,11 +74,6 @@ async def download(task_id: str):
     Returns:
         文件下载响应
     """
-    from fastapi.responses import FileResponse
-    from pathlib import Path
-    from app.config import settings
-    from app.models.response import ApiResponse, ErrorCode
-    from app.services.staging_service import StagingService
 
     # 从暂存区元数据获取文件信息（优先）
     staging = StagingService()
@@ -98,7 +99,6 @@ async def download(task_id: str):
 
     if staging_file:
         # 使用原始文件名去掉扩展名，加上目标格式后缀
-        import os
         original_base = os.path.splitext(staging_file.original_name)[0]
         target_ext = file_path.suffix
         # 构建用户友好的文件名

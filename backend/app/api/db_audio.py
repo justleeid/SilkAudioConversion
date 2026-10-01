@@ -5,6 +5,7 @@
 import uuid
 from pathlib import Path
 from fastapi import APIRouter, Query
+from fastapi.responses import Response
 from typing import Optional
 from pydantic import BaseModel
 
@@ -149,7 +150,6 @@ async def preview_database_audio(
     source: str = Query("mysql", description="数据源: mysql / mssql")
 ):
     """获取数据库音频的预览（返回音频流供浏览器播放）"""
-    from fastapi.responses import Response
 
     # 验证 source 参数
     if source not in ("mysql", "mssql"):

@@ -10,6 +10,9 @@ from app.services.plist_service import PlistService
 from app.logger import logger
 from pathlib import Path
 from app.config import settings
+import uuid
+import os
+from app.services.staging_service import StagingService
 
 router = APIRouter(prefix="/api/plist", tags=["plist"])
 
@@ -61,13 +64,10 @@ class PlistSplitRequest(BaseModel):
 async def merge_silk_to_plist(request: PlistMergeRequest):
     """合并多个 SILK 文件为一个 PLIST"""
     try:
-        import uuid
-        import os
         upload_dir = Path(settings.upload_dir)
         output_dir = Path(settings.output_dir)
 
         # 提前导入暂存服务，用于解析原始文件名
-        from app.services.staging_service import StagingService
         staging = StagingService()
 
         # 查找对应的 SILK 文件，同时解析原始文件名作为 PLIST key
@@ -173,7 +173,6 @@ async def extract_plist_to_silk(request: PlistExtractRequest):
                 message="PLIST 提取失败或无有效 SILK 数据"
             )
 
-        import uuid
         file_ids = []
         for p in extracted:
             fid = uuid.uuid4().hex
@@ -234,7 +233,6 @@ async def preview_plist(file_id: str):
 async def split_plist(request: PlistSplitRequest):
     """拆分 PLIST 文件"""
     try:
-        import uuid
 
         plist_path = find_plist_file(request.plist_file_id)
 
@@ -259,7 +257,6 @@ async def split_plist(request: PlistSplitRequest):
         )
 
         # 将拆分结果添加到暂存区
-        from app.services.staging_service import StagingService
         staging = StagingService()
         file_ids = []
 

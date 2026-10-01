@@ -33,7 +33,6 @@ logger.add(
 def set_log_level(level: str):
     """动态修改日志级别"""
     logger.remove()
-    import sys
     logger.add(
         sys.stdout,
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "

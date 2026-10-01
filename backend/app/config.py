@@ -2,6 +2,8 @@
 应用配置模块
 参考 development.md 第 7.2 节
 """
+import os
+
 from pydantic_settings import BaseSettings
 
 
@@ -57,7 +59,6 @@ class Settings(BaseSettings):
 
     class Config:
         # 使用绝对路径指向 .env 文件
-        import os
         env_file = os.path.join(os.path.dirname(__file__), '..', '.env')
         case_sensitive = False
 

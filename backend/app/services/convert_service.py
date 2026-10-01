@@ -13,6 +13,27 @@ from app.services.audio_service import AudioService
 from app.services.file_service import FileService
 from app.services.staging_service import StagingService
 
+# 转换路由表: (输入格式, 目标格式) -> 调用构造器
+# 参数取值与历史行为保持一致（缺省回退 24000/20）
+_CONVERSIONS = {
+    ('.silk', 'WAV'): lambda svc, src, out, r: svc.silk_to_wav(src, out, r.sample_rate or 24000),
+    ('.silk', 'MP3'): lambda svc, src, out, r: svc.silk_to_mp3(src, out, r.sample_rate or 24000),
+    ('.wav', 'SILK'): lambda svc, src, out, r: svc.wav_to_silk(
+        src, out, r.sample_rate or 24000, r.bit_rate or 24000, r.frame_size or 20, r.wechat_compatible),
+    ('.mp3', 'SILK'): lambda svc, src, out, r: svc.mp3_to_silk(
+        src, out, r.sample_rate or 24000, r.bit_rate or 24000, r.frame_size or 20, r.wechat_compatible),
+    ('.m4a', 'WAV'): lambda svc, src, out, r: svc.m4a_to_wav(src, out, r.sample_rate or 24000),
+    ('.m4a', 'MP3'): lambda svc, src, out, r: svc.m4a_to_mp3(
+        src, out, r.sample_rate or 24000, r.bit_rate or 24000),
+    ('.m4a', 'SILK'): lambda svc, src, out, r: svc.m4a_to_silk(
+        src, out, r.sample_rate or 24000, r.bit_rate or 24000, r.frame_size or 20, r.wechat_compatible),
+    ('.amr', 'WAV'): lambda svc, src, out, r: svc.amr_to_wav(src, out, r.sample_rate or 24000),
+    ('.amr', 'MP3'): lambda svc, src, out, r: svc.amr_to_mp3(
+        src, out, r.sample_rate or 24000, r.bit_rate or 24000),
+    ('.amr', 'SILK'): lambda svc, src, out, r: svc.amr_to_silk(
+        src, out, r.sample_rate or 24000, r.bit_rate or 24000, r.frame_size or 20, r.wechat_compatible),
+}
+
 
 class ConvertService:
     """音频转换协调服务"""
@@ -176,128 +197,19 @@ class ConvertService:
                 output_filename = f"{task_id}_output.{request.target_format.lower()}"
                 output_path = self.output_dir / output_filename
 
-                # 根据输入格式和目标格式选择转换方法
-                success = False
+                # 查路由表执行转换
                 input_format = input_file.suffix.lower()
+                convert_fn = _CONVERSIONS.get((input_format, request.target_format.value))
 
-                if input_format == '.silk':
-                    # SILK 解码 → WAV/MP3
-                    if request.target_format.value == 'WAV':
-                        success = await self.audio_service.silk_to_wav(
-                            input_file,
-                            output_path,
-                            request.sample_rate or 24000
-                        )
-                    elif request.target_format.value == 'MP3':
-                        success = await self.audio_service.silk_to_mp3(
-                            input_file,
-                            output_path,
-                            request.sample_rate or 24000
-                        )
-                    else:
-                        task_info.status = TaskStatus.FAILED
-                        task_info.error_message = f"不支持从 SILK 转换到 {request.target_format.value}"
-                        logger.error(f"不支持的转换: SILK → {request.target_format.value}")
-                        return
-
-                elif input_format == '.wav':
-                    # WAV 编码 → SILK
-                    if request.target_format.value == 'SILK':
-                        success = await self.audio_service.wav_to_silk(
-                            input_file,
-                            output_path,
-                            request.sample_rate or 24000,
-                            request.bit_rate or 24000,
-                            request.frame_size or 20,
-                            request.wechat_compatible
-                        )
-                    else:
-                        task_info.status = TaskStatus.FAILED
-                        task_info.error_message = f"不支持从 WAV 转换到 {request.target_format.value}"
-                        logger.error(f"不支持的转换: WAV → {request.target_format.value}")
-                        return
-
-                elif input_format == '.mp3':
-                    # MP3 编码 → SILK
-                    if request.target_format.value == 'SILK':
-                        success = await self.audio_service.mp3_to_silk(
-                            input_file,
-                            output_path,
-                            request.sample_rate or 24000,
-                            request.bit_rate or 24000,
-                            request.frame_size or 20,
-                            request.wechat_compatible
-                        )
-                    else:
-                        task_info.status = TaskStatus.FAILED
-                        task_info.error_message = f"不支持从 MP3 转换到 {request.target_format.value}"
-                        logger.error(f"不支持的转换: MP3 → {request.target_format.value}")
-                        return
-
-                elif input_format == '.m4a':
-                    # M4A 编码 → WAV/MP3/SILK
-                    if request.target_format.value == 'WAV':
-                        success = await self.audio_service.m4a_to_wav(
-                            input_file,
-                            output_path,
-                            request.sample_rate or 24000
-                        )
-                    elif request.target_format.value == 'MP3':
-                        success = await self.audio_service.m4a_to_mp3(
-                            input_file,
-                            output_path,
-                            request.sample_rate or 24000,
-                            request.bit_rate or 24000
-                        )
-                    elif request.target_format.value == 'SILK':
-                        success = await self.audio_service.m4a_to_silk(
-                            input_file,
-                            output_path,
-                            request.sample_rate or 24000,
-                            request.bit_rate or 24000,
-                            request.frame_size or 20,
-                            request.wechat_compatible
-                        )
-                    else:
-                        task_info.status = TaskStatus.FAILED
-                        task_info.error_message = f"不支持从 M4A 转换到 {request.target_format.value}"
-                        logger.error(f"不支持的转换: M4A → {request.target_format.value}")
-                        return
-
-                elif input_format == '.amr':
-                    # AMR 编码 → WAV/MP3/SILK
-                    if request.target_format.value == 'WAV':
-                        success = await self.audio_service.amr_to_wav(
-                            input_file,
-                            output_path,
-                            request.sample_rate or 24000
-                        )
-                    elif request.target_format.value == 'MP3':
-                        success = await self.audio_service.amr_to_mp3(
-                            input_file,
-                            output_path,
-                            request.sample_rate or 24000
-                        )
-                    elif request.target_format.value == 'SILK':
-                        success = await self.audio_service.amr_to_silk(
-                            input_file,
-                            output_path,
-                            request.sample_rate or 24000,
-                            request.bit_rate or 24000,
-                            request.frame_size or 20,
-                            request.wechat_compatible
-                        )
-                    else:
-                        task_info.status = TaskStatus.FAILED
-                        task_info.error_message = f"不支持从 AMR 转换到 {request.target_format.value}"
-                        logger.error(f"不支持的转换: AMR → {request.target_format.value}")
-                        return
-
-                else:
+                if convert_fn is None:
                     task_info.status = TaskStatus.FAILED
-                    task_info.error_message = f"不支持的输入格式: {input_format}"
-                    logger.error(f"不支持的输入格式: {input_format}")
+                    task_info.error_message = (
+                        f"不支持从 {input_format.lstrip('.').upper()} 转换到 {request.target_format.value}"
+                    )
+                    logger.error(f"不支持的转换: {input_format} → {request.target_format.value}")
                     return
+
+                success = await convert_fn(self.audio_service, input_file, output_path, request)
 
                 # 更新进度
                 task_info.progress = 90

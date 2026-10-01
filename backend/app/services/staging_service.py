@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 from app.config import settings
 from app.logger import logger
+import json
 
 
 class StagingFile(BaseModel):
@@ -77,7 +78,6 @@ class StagingService:
     def _save_metadata(self):
         """将内存元数据持久化到磁盘 JSON 文件"""
         try:
-            import json
             with open(self._metadata_file, 'w', encoding='utf-8') as f:
                 json.dump(self._metadata, f, ensure_ascii=False, indent=2)
         except Exception as e:
@@ -142,7 +142,6 @@ class StagingService:
         if not self._metadata_file.exists():
             return
         try:
-            import json
             with open(self._metadata_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             if isinstance(data, dict):
@@ -163,7 +162,6 @@ class StagingService:
         size = output_path.stat().st_size if output_path.exists() else 0
 
         # 生成用户友好的输出文件名（去除历史任务前缀）
-        import os
         normalized_original_name = self._strip_task_prefixes(original_name)
         original_base = os.path.splitext(normalized_original_name)[0]
         output_ext = output_path.suffix
@@ -266,7 +264,6 @@ class StagingService:
             expires_at = created_at + timedelta(hours=self.expire_hours)
 
             # 计算基于磁盘文件名的显示名称
-            import os
             if file_id in upload_name_map:
                 base = os.path.splitext(upload_name_map[file_id])[0]
                 ext = file_path.suffix
@@ -331,7 +328,6 @@ class StagingService:
             return False
 
         # 保留原始扩展名
-        import os
         current_name = data.get('output_name') or data.get('original_name', '')
         _, ext = os.path.splitext(current_name)
         if ext and not new_name.lower().endswith(ext.lower()):
